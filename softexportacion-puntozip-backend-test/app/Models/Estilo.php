@@ -1,0 +1,110 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+
+class Estilo extends Model
+{
+    protected $table = 'estilos';
+    protected $primaryKey = 'id';
+    
+    protected $fillable = [
+        'codigo',
+        'nombre',
+        'descripcion',
+        'temporada',
+        'año_produccion',
+        'costo_objetivo',
+        'tiempo_objetivo_min',
+        'estado'
+    ];
+
+    protected $casts = [
+        'costo_objetivo' => 'decimal:4',
+        'tiempo_objetivo_min' => 'decimal:2',
+        'año_produccion' => 'integer',
+        'fecha_creacion' => 'datetime',
+        'fecha_actualizacion' => 'datetime'
+    ];
+
+    const UPDATED_AT = 'fecha_actualizacion';
+    const CREATED_AT = 'fecha_creacion';
+
+    // Relaciones
+    public function variantes(): HasMany
+    {
+        return $this->hasMany(VarianteEstilo::class, 'id_estilo');
+    }
+
+    public function flujos(): HasMany
+    {
+        return $this->hasMany(FlujoEstilo::class, 'id_estilo');
+    }
+
+    public function bomItems(): HasMany
+    {
+        return $this->hasMany(BomEstilo::class, 'id_estilo');
+    }
+
+    // Relación con materiales a través del BOM
+    public function materiales(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            Material::class,
+            BomEstilo::class,
+            'id_estilo',
+            'id',
+            'id',
+            'id_material'
+        );
+    }
+
+    // Scopes
+    public function scopeActivos($query)
+    {
+        return $query->where('estado', 'activo');
+    }
+
+    public function scopeEnDesarrollo($query)
+    {
+        return $query->where('estado', 'desarrollo');
+    }
+
+    public function scopePorTemporada($query, $temporada)
+    {
+        return $query->where('temporada', $temporada);
+    }
+
+    public function scopePorAño($query, $año)
+    {
+        return $query->where('año_produccion', $año);
+    }
+
+    // Accessors
+    public function getDiferenciaCostoAttribute()
+    {
+        if (!$this->costo_objetivo) return null;
+        
+        $costoCalculado = $this->variantes()
+            ->join('calculos_variantes', 'variantes_estilos.id', '=', 'calculos_variantes.id_variante_estilo')
+            ->where('calculos_variantes.es_actual', true)
+            ->avg('calculos_variantes.costo_total');
+            
+        return $costoCalculado ? ($costoCalculado - $this->costo_objetivo) : null;
+    }
+
+    public function getDiferenciaTiempoAttribute()
+    {
+        if (!$this->tiempo_objetivo_min) return null;
+        
+        $tiempoCalculado = $this->variantes()
+            ->join('calculos_variantes', 'variantes_estilos.id', '=', 'calculos_variantes.id_variante_estilo')
+            ->where('calculos_variantes.es_actual', true)
+            ->avg('calculos_variantes.tiempo_total_min');
+            
+        return $tiempoCalculado ? ($tiempoCalculado - $this->tiempo_objetivo_min) : null;
+    }
+}

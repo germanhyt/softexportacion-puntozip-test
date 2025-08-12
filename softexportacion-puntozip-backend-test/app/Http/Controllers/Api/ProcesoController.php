@@ -1,0 +1,210 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
+use App\Models\Proceso;
+
+class ProcesoController
+{
+    /**
+     * Listar todos los procesos disponibles
+     */
+    public function index(Request $request): JsonResponse
+    {
+        try {
+            $query = Proceso::with('tipoProceso');
+
+            if ($request->has('id_tipo_proceso')) {
+                $query->where('id_tipo_proceso', $request->id_tipo_proceso);
+            }
+
+            if ($request->has('activos_solo')) {
+                $query->where('estado', 'activo');
+            }
+
+            $procesos = $query->orderBy('nombre')->get();
+
+            $data = $procesos->map(function ($p) {
+                return [
+                    'id' => $p->id,
+                    'codigo' => $p->codigo,
+                    'nombre' => $p->nombre,
+                    'descripcion' => $p->descripcion,
+                    'sop' => $p->sop,
+                    'costo_base' => (float) $p->costo_base,
+                    'tiempo_base_min' => (float) $p->tiempo_base_min,
+                    'merma_porcentaje' => (float) $p->merma_porcentaje,
+                    'es_paralelo' => (bool) $p->es_paralelo,
+                    'estado' => $p->estado,
+                    'tipo_proceso' => $p->tipoProceso ? [
+                        'id' => $p->tipoProceso->id,
+                        'nombre' => $p->tipoProceso->nombre,
+                        'color_hex' => $p->tipoProceso->color_hex
+                    ] : null,
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $data
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener procesos',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener proceso específico con SOP
+     */
+    public function show(string $id): JsonResponse
+    {
+        try {
+            $proceso = Proceso::with(['tipoProceso','inputs','outputs'])->findOrFail($id);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'id' => $proceso->id,
+                    'codigo' => $proceso->codigo,
+                    'nombre' => $proceso->nombre,
+                    'descripcion' => $proceso->descripcion,
+                    'sop' => $proceso->sop,
+                    'costo_base' => (float) $proceso->costo_base,
+                    'tiempo_base_min' => (float) $proceso->tiempo_base_min,
+                    'merma_porcentaje' => (float) $proceso->merma_porcentaje,
+                    'es_paralelo' => (bool) $proceso->es_paralelo,
+                    'tipo_proceso' => $proceso->tipoProceso ? [
+                        'id' => $proceso->tipoProceso->id,
+                        'nombre' => $proceso->tipoProceso->nombre,
+                        'color_hex' => $proceso->tipoProceso->color_hex
+                    ] : null,
+                    'inputs' => $proceso->inputs->map(fn($i) => [
+                        'id' => $i->id,
+                        'descripcion' => $i->descripcion,
+                        'tipo_input' => $i->tipo_input,
+                        'id_material' => $i->id_material,
+                        'id_proceso_origen' => $i->id_proceso_origen,
+                        'es_obligatorio' => (bool) $i->es_obligatorio,
+                        'orden' => $i->orden,
+                    ]),
+                    'outputs' => $proceso->outputs->map(fn($o) => [
+                        'id' => $o->id,
+                        'descripcion' => $o->descripcion,
+                        'tipo_output' => $o->tipo_output,
+                        'es_principal' => (bool) $o->es_principal,
+                        'orden' => $o->orden,
+                    ]),
+                ]
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Proceso no encontrado'
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener proceso',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener SOP específico del proceso (para modal)
+     */
+    public function obtenerSOP(string $id): JsonResponse
+    {
+        try {
+            $proceso = Proceso::with(['inputs','outputs','tipoProceso'])->findOrFail($id);
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'proceso_id' => $proceso->id,
+                    'nombre' => $proceso->nombre,
+                    'descripcion' => $proceso->descripcion,
+                    'sop' => $proceso->sop ?? 'Procedimiento Operativo Estándar no disponible.',
+                    'tiempo_base_min' => (float) $proceso->tiempo_base_min,
+                    'costo_base' => (float) $proceso->costo_base,
+                    'merma_porcentaje' => (float) $proceso->merma_porcentaje,
+                    'es_paralelo' => (bool) $proceso->es_paralelo,
+                    'tipo_proceso' => $proceso->tipoProceso ? [
+                        'nombre' => $proceso->tipoProceso->nombre,
+                        'color_hex' => $proceso->tipoProceso->color_hex
+                    ] : null,
+                    'inputs' => $proceso->inputs->map(fn($i) => $i->descripcion)->values(),
+                    'outputs' => $proceso->outputs->map(fn($o) => $o->descripcion)->values(),
+                ]
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Proceso no encontrado'
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener SOP',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Crear nuevo proceso
+     */
+    public function store(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'codigo' => 'required|string|max:50|unique:procesos,codigo',
+                'nombre' => 'required|string|max:100',
+                'descripcion' => 'nullable|string',
+                'id_tipo_proceso' => 'required|exists:tipos_procesos,id',
+                'costo_base' => 'required|numeric|min:0',
+                'tiempo_base_min' => 'required|numeric|min:0',
+                'merma_porcentaje' => 'required|numeric|min:0|max:100',
+                'es_paralelo' => 'boolean',
+                'sop' => 'nullable|string'
+            ]);
+
+            $proceso = Proceso::create([
+                'codigo' => $request->codigo,
+                'nombre' => $request->nombre,
+                'descripcion' => $request->descripcion,
+                'sop' => $request->sop,
+                'id_tipo_proceso' => $request->id_tipo_proceso,
+                'costo_base' => $request->costo_base,
+                'tiempo_base_min' => $request->tiempo_base_min,
+                'merma_porcentaje' => $request->merma_porcentaje,
+                'es_paralelo' => $request->es_paralelo ?? false,
+                'estado' => 'activo'
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Proceso creado exitosamente',
+                'data' => $proceso->load('tipoProceso')
+            ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al crear proceso',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+}

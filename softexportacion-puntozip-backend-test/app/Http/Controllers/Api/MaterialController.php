@@ -1,0 +1,251 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
+use App\Models\Material;
+
+class MaterialController
+{
+    /**
+     * Listar materiales con filtros
+     */
+    public function index(Request $request): JsonResponse
+    {
+        try {
+            $query = Material::with(['categoria', 'unidadMedida']);
+
+            // Filtros
+            if ($request->has('categoria_id')) {
+                $query->porCategoria($request->categoria_id);
+            }
+
+            if ($request->has('activos_solo')) {
+                $query->activos();
+            }
+
+            if ($request->has('con_stock')) {
+                $query->conStock();
+            }
+
+            if ($request->has('buscar')) {
+                $query->where('nombre', 'like', '%' . $request->buscar . '%');
+            }
+
+            $materiales = $query->orderBy('nombre')->paginate(15);
+
+            return response()->json([
+                'success' => true,
+                'data' => $materiales
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener los materiales',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Crear nuevo material
+     */
+    public function store(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'id_categoria' => 'required|exists:categorias_materiales,id',
+                'id_unidad_medida' => 'required|exists:unidades_medida,id',
+                'nombre' => 'required|string|max:100',
+                'descripcion' => 'nullable|string',
+                'costo_base' => 'required|numeric|min:0',
+                'stock_minimo' => 'required|numeric|min:0',
+                'proveedor' => 'nullable|string|max:100',
+                'estado' => 'nullable|in:activo,inactivo'
+            ]);
+
+            $material = Material::create($request->all());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Material creado exitosamente',
+                'data' => $material->load(['categoria', 'unidadMedida'])
+            ], 201);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al crear el material',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Mostrar material específico
+     */
+    public function show(string $id): JsonResponse
+    {
+        try {
+            $material = Material::with(['categoria', 'unidadMedida', 'colores', 'recetas'])
+                ->findOrFail($id);
+
+            return response()->json([
+                'success' => true,
+                'data' => $material
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Material no encontrado'
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener el material',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Actualizar material
+     */
+    public function update(Request $request, string $id): JsonResponse
+    {
+        try {
+            $material = Material::findOrFail($id);
+
+            $request->validate([
+                'id_categoria' => 'sometimes|exists:categorias_materiales,id',
+                'id_unidad_medida' => 'sometimes|exists:unidades_medida,id',
+                'nombre' => 'sometimes|string|max:100',
+                'descripcion' => 'nullable|string',
+                'costo_base' => 'sometimes|numeric|min:0',
+                'stock_minimo' => 'sometimes|numeric|min:0',
+                'proveedor' => 'nullable|string|max:100',
+                'estado' => 'sometimes|in:activo,inactivo'
+            ]);
+
+            $material->update($request->all());
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Material actualizado exitosamente',
+                'data' => $material->load(['categoria', 'unidadMedida'])
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Material no encontrado'
+            ], 404);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al actualizar el material',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Eliminar material
+     */
+    public function destroy(string $id): JsonResponse
+    {
+        try {
+            $material = Material::findOrFail($id);
+
+            // Verificar si tiene recetas asociadas
+            if ($material->recetas()->count() > 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No se puede eliminar el material porque tiene recetas asociadas'
+                ], 400);
+            }
+
+            $material->update(['estado' => 'inactivo']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Material eliminado exitosamente'
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Material no encontrado'
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al eliminar el material',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Asociar colores a material
+     */
+    public function asociarColores(Request $request, string $id): JsonResponse
+    {
+        try {
+            $material = Material::findOrFail($id);
+
+            $request->validate([
+                'colores' => 'required|array',
+                'colores.*.id_color' => 'required|exists:colores,id',
+                'colores.*.costo_adicional' => 'nullable|numeric|min:0'
+            ]);
+
+            $syncData = [];
+            foreach ($request->colores as $color) {
+                $syncData[$color['id_color']] = [
+                    'costo_adicional' => $color['costo_adicional'] ?? 0,
+                    'estado' => 'activo'
+                ];
+            }
+
+            $material->colores()->sync($syncData);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Colores asociados exitosamente',
+                'data' => $material->load('colores')
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Material no encontrado'
+            ], 404);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al asociar colores',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+}

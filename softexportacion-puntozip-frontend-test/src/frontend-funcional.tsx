@@ -1,0 +1,2044 @@
+// Sistema de Gestión Textil - Con ReactFlow Real
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+    ReactFlow,
+    Controls,
+    Background,
+    addEdge,
+    Connection,
+    Edge,
+    Node,
+    ConnectionMode,
+    Handle,
+    Position,
+    NodeProps,
+    ReactFlowProvider,
+    MarkerType,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+
+// ============================================================================
+// TIPOS DE DATOS BASADOS EN LA BD
+// ============================================================================
+
+interface Estilo {
+    id: number;
+    codigo: string;
+    nombre: string;
+    descripcion?: string;
+    temporada: string;
+    año_produccion: number;
+    costo_objetivo?: number;
+    tiempo_objetivo_min?: number;
+    estado: 'desarrollo' | 'activo' | 'descontinuado';
+    fecha_creacion: string;
+}
+
+interface Material {
+    id: number;
+    codigo: string;
+    nombre: string;
+    costo_unitario: number;
+    stock_actual: number;
+    proveedor?: string;
+    categoria: { nombre: string };
+    unidad_medida: { nombre: string; codigo: string };
+}
+
+interface BomItem {
+    id: number;
+    id_material: number;
+    material: {
+        codigo: string;
+        nombre: string;
+        categoria: { nombre: string };
+        unidad_medida: { nombre: string; codigo: string };
+        costo_unitario: number;
+    };
+    cantidad_base: number;
+    es_critico: boolean;
+    proceso?: { nombre: string };
+}
+
+interface Proceso {
+    id: number;
+    codigo: string;
+    nombre: string;
+    descripcion: string;
+    tipo_proceso: { nombre: string; color_hex: string };
+    costo_base: number;
+    tiempo_base_min: number;
+    merma_porcentaje: number;
+    es_paralelo: boolean;
+    sop?: string;
+    posX?: number;
+    posY?: number;
+}
+
+interface Color {
+    id: number;
+    nombre: string;
+    codigo_hex: string;
+    codigo_pantone?: string;
+}
+
+interface FlujoEstilo {
+    id: number;
+    id_estilo: number;
+    nombre: string;
+    version: number;
+    costo_total_calculado: number;
+    tiempo_total_calculado: number;
+    es_actual: boolean;
+    estado: 'activo' | 'inactivo' | 'borrador';
+}
+
+interface FlowNode extends Node {
+    id: string;
+    type?: string;
+    position: { x: number; y: number };
+    data: {
+        id_proceso: number;
+        nombre: string;
+        descripcion: string;
+        tiempo_base_min: number;
+        costo_base: number;
+        tipo_proceso: { nombre: string; color_hex: string } | null;
+        orden_secuencia: number;
+        es_paralelo: boolean;
+        pos_x?: number; // nuevo estándar
+        pos_y?: number; // nuevo estándar
+        posX?: number; // compat legado
+        posY?: number; // compat legado
+        tiempo_personalizado_min?: number;
+        costo_personalizado?: number;
+    };
+}
+
+interface FlowEdge extends Edge {
+    id: string;
+    source: string;
+    target: string;
+    type?: string;
+    animated?: boolean;
+    style?: React.CSSProperties;
+}
+
+interface ProcesoDetalle {
+    proceso_id: number;
+    nombre: string;
+    descripcion: string;
+    sop?: string;
+    tiempo_base_min?: number;
+    costo_base?: number;
+    merma_porcentaje?: number;
+    es_paralelo?: boolean;
+    tipo_proceso?: { nombre: string; color_hex: string } | null;
+    inputs: string[];
+    outputs: string[];
+}
+
+// ============================================================================
+// SERVICIOS API
+// ============================================================================
+
+const API_BASE_URL = 'http://localhost:8002/api/v1';
+
+class ApiService {
+    private static async request(endpoint: string, options: RequestInit = {}) {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                ...options.headers,
+            },
+            ...options,
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        return response.json();
+    }
+
+    // Estilos
+    static async getEstilos(): Promise<Estilo[]> {
+        try {
+            const response = await this.request('/estilos');
+            return response.success && Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+            console.error('Error obteniendo estilos:', error);
+            // Fallback con datos mock si el servidor no está disponible
+            return [
+                {
+                    id: 1,
+                    codigo: 'EST-001',
+                    nombre: 'Polo Básico Cotton',
+                    descripcion: 'Polo básico de algodón 100% con cuello redondo',
+                    temporada: 'Verano',
+                    año_produccion: 2024,
+                    costo_objetivo: 15.50,
+                    tiempo_objetivo_min: 45,
+                    estado: 'activo',
+                    fecha_creacion: new Date().toISOString(),
+                },
+                {
+                    id: 2,
+                    codigo: 'EST-002',
+                    nombre: 'Camisa Sport Jersey',
+                    descripcion: 'Camisa deportiva en tela jersey con tratamiento anti-UV',
+                    temporada: 'Primavera',
+                    año_produccion: 2024,
+                    costo_objetivo: 22.75,
+                    tiempo_objetivo_min: 65,
+                    estado: 'desarrollo',
+                    fecha_creacion: new Date().toISOString(),
+                }
+            ];
+        }
+    }
+
+    static async getEstilo(id: number): Promise<Estilo> {
+        const response = await this.request(`/estilos/${id}`);
+        return response.data;
+    }
+
+    // BOM
+    static async getBOM(id: number): Promise<{
+        bom_items: BomItem[],
+        resumen: {
+            total_items: number;
+            costo_total_materiales: number;
+            items_criticos: number;
+        }
+    }> {
+        try {
+            const response = await this.request(`/estilos/${id}/bom`);
+
+            if (response.success && response.data) {
+                const bomItems = Array.isArray(response.data.bom_items) ? response.data.bom_items : [];
+                const resumen = response.data.resumen || {
+                    total_items: 0,
+                    costo_total_materiales: 0,
+                    items_criticos: 0
+                };
+
+                return {
+                    bom_items: bomItems,
+                    resumen: resumen
+                };
+            }
+
+            return {
+                bom_items: [],
+                resumen: {
+                    total_items: 0,
+                    costo_total_materiales: 0,
+                    items_criticos: 0
+                }
+            };
+        } catch (error) {
+            console.error('Error obteniendo BOM:', error);
+            return {
+                bom_items: [],
+                resumen: {
+                    total_items: 0,
+                    costo_total_materiales: 0,
+                    items_criticos: 0
+                }
+            };
+        }
+    }
+
+    // Procesos - Conectar a API real
+    static async getProcesos(): Promise<Proceso[]> {
+        try {
+            const response = await this.request('/procesos?activos_solo=true');
+            if (response.success && Array.isArray(response.data)) {
+                return (response.data as any[]).map((proceso: any): Proceso => ({
+                    ...proceso,
+                    tipo_proceso: proceso.tipoProceso || proceso.tipo_proceso || {
+                        nombre: 'General',
+                        color_hex: '#64748b'
+                    }
+                }));
+            }
+            return [];
+        } catch (error) {
+            console.error('Error obteniendo procesos, usando datos mock:', error);
+
+            // Datos mock mejorados para procesos
+            const mockProcesos: Proceso[] = [
+                {
+                    id: 1,
+                    codigo: 'TEJ-001',
+                    nombre: 'Tejido Jersey',
+                    descripcion: 'Proceso de tejido en máquina circular para generar tela jersey con gramaje específico',
+                    tipo_proceso: { nombre: 'Tejido', color_hex: '#3b82f6' },
+                    costo_base: 2.50,
+                    tiempo_base_min: 45,
+                    merma_porcentaje: 5,
+                    es_paralelo: false,
+                    sop: 'SOP-TEJ-001',
+                    posX: 100,
+                    posY: 100,
+                },
+                {
+                    id: 2,
+                    codigo: 'TIN-001',
+                    nombre: 'Teñido Reactivo',
+                    descripcion: 'Proceso de teñido con colorantes reactivos para fibras celulósicas',
+                    tipo_proceso: { nombre: 'Acabado', color_hex: '#10b981' },
+                    costo_base: 3.75,
+                    tiempo_base_min: 120,
+                    merma_porcentaje: 3,
+                    es_paralelo: false,
+                    sop: 'SOP-TIN-001',
+                    posX: 400,
+                    posY: 100,
+                },
+                {
+                    id: 3,
+                    codigo: 'COR-001',
+                    nombre: 'Corte Industrial',
+                    descripcion: 'Corte automatizado de piezas textiles según patrones digitalizados',
+                    tipo_proceso: { nombre: 'Corte', color_hex: '#f59e0b' },
+                    costo_base: 1.25,
+                    tiempo_base_min: 30,
+                    merma_porcentaje: 15,
+                    es_paralelo: true,
+                    sop: 'SOP-COR-001',
+                    posX: 700,
+                    posY: 100,
+                },
+                {
+                    id: 4,
+                    codigo: 'CNF-001',
+                    nombre: 'Confección Premium',
+                    descripcion: 'Ensamble y costura especializada con acabados de alta calidad',
+                    tipo_proceso: { nombre: 'Confección', color_hex: '#ec4899' },
+                    costo_base: 5.50,
+                    tiempo_base_min: 180,
+                    merma_porcentaje: 2,
+                    es_paralelo: false,
+                    sop: 'SOP-CNF-001',
+                    posX: 1000,
+                    posY: 100,
+                },
+                {
+                    id: 5,
+                    codigo: 'EST-001',
+                    nombre: 'Estampado Serigráfico',
+                    descripcion: 'Aplicación de diseños mediante técnica de serigrafía con tintas especializadas',
+                    tipo_proceso: { nombre: 'Estampado', color_hex: '#8b5cf6' },
+                    costo_base: 4.20,
+                    tiempo_base_min: 90,
+                    merma_porcentaje: 8,
+                    es_paralelo: true,
+                    sop: 'SOP-EST-001',
+                    posX: 850,
+                    posY: 300,
+                },
+                {
+                    id: 6,
+                    codigo: 'LAV-001',
+                    nombre: 'Lavado Industrial',
+                    descripcion: 'Proceso de lavado y suavizado para mejorar tacto y apariencia final',
+                    tipo_proceso: { nombre: 'Acabado', color_hex: '#06b6d4' },
+                    costo_base: 2.80,
+                    tiempo_base_min: 75,
+                    merma_porcentaje: 4,
+                    es_paralelo: false,
+                    sop: 'SOP-LAV-001',
+                    posX: 550,
+                    posY: 300,
+                },
+                {
+                    id: 7,
+                    codigo: 'INS-001',
+                    nombre: 'Inspección de Calidad',
+                    descripcion: 'Control de calidad exhaustivo según estándares internacionales',
+                    tipo_proceso: { nombre: 'Calidad', color_hex: '#ef4444' },
+                    costo_base: 1.50,
+                    tiempo_base_min: 25,
+                    merma_porcentaje: 1,
+                    es_paralelo: false,
+                    sop: 'SOP-INS-001',
+                    posX: 1200,
+                    posY: 200,
+                },
+                {
+                    id: 8,
+                    codigo: 'EMP-001',
+                    nombre: 'Empaque Premium',
+                    descripcion: 'Empacado especializado con materiales biodegradables y presentación premium',
+                    tipo_proceso: { nombre: 'Empaque', color_hex: '#84cc16' },
+                    costo_base: 0.95,
+                    tiempo_base_min: 15,
+                    merma_porcentaje: 0,
+                    es_paralelo: false,
+                    sop: 'SOP-EMP-001',
+                    posX: 1350,
+                    posY: 100,
+                }
+            ];
+
+            return mockProcesos;
+        }
+    }
+
+    // Obtener detalles específicos del proceso
+    static async getProcesoDetalle(id: number): Promise<ProcesoDetalle> {
+        try {
+            const response = await this.request(`/procesos/${id}/sop`);
+            const d = response.data || {};
+            return {
+                proceso_id: d.proceso_id || id,
+                nombre: d.nombre || 'Proceso',
+                descripcion: d.descripcion || '',
+                sop: d.sop,
+                tiempo_base_min: d.tiempo_base_min,
+                costo_base: d.costo_base,
+                merma_porcentaje: d.merma_porcentaje,
+                es_paralelo: d.es_paralelo,
+                tipo_proceso: d.tipo_proceso || null,
+                inputs: Array.isArray(d.inputs) ? d.inputs : (d.inputs ? [d.inputs] : []),
+                outputs: Array.isArray(d.outputs) ? d.outputs : (d.outputs ? [d.outputs] : []),
+            };
+        } catch (error) {
+            console.error('Error obteniendo detalle del proceso:', error);
+            return {
+                proceso_id: id,
+                nombre: 'Proceso',
+                descripcion: 'Descripción no disponible',
+                sop: 'SOP no disponible',
+                inputs: [],
+                outputs: []
+            };
+        }
+    }
+
+    // Colores
+    static async getColores(): Promise<Color[]> {
+        try {
+            const response = await this.request('/colores');
+            if (response.data) {
+                if (Array.isArray(response.data)) {
+                    return response.data;
+                } else if (response.data.data && Array.isArray(response.data.data)) {
+                    return response.data.data;
+                }
+            }
+            return [];
+        } catch (error) {
+            console.error('Error obteniendo colores:', error);
+            return [];
+        }
+    }
+
+    // Flujos - Conectar a API real
+    static async getFlujosByEstilo(estiloId: number): Promise<FlujoEstilo[]> {
+        try {
+            const response = await this.request(`/estilos/${estiloId}/flujos`);
+            return response.success && Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+            console.error('Error obteniendo flujos:', error);
+            // Crear flujo mock si no hay datos
+            return [{
+                id: 1,
+                id_estilo: estiloId,
+                nombre: 'Flujo Principal',
+                version: 1,
+                costo_total_calculado: 0,
+                tiempo_total_calculado: 0,
+                es_actual: true,
+                estado: 'borrador'
+            }];
+        }
+    }
+
+    static async getFlujo(estiloId: number, flujoId: number): Promise<{
+        flujo: FlujoEstilo;
+        nodes: FlowNode[];
+        edges: FlowEdge[];
+    }> {
+        try {
+            const response = await this.request(`/estilos/${estiloId}/flujos/${flujoId}`);
+            if (response.success && response.data) {
+                const nodes: FlowNode[] = (response.data.nodes || []).map((node: any) => {
+                    const dx = node.data || {};
+                    const posX = node.pos_x ?? node.data?.pos_x ?? node.position?.x ?? node.data?.posX ?? 100;
+                    const posY = node.pos_y ?? node.data?.pos_y ?? node.position?.y ?? node.data?.posY ?? 100;
+                    return {
+                        id: node.id.toString(),
+                        type: 'customNode',
+                        position: { x: posX, y: posY },
+                        data: {
+                            id_proceso: dx.id_proceso,
+                            nombre: dx.nombre,
+                            descripcion: dx.descripcion,
+                            tiempo_base_min: dx.tiempo_base_min || 0,
+                            costo_base: dx.costo_base || 0,
+                            tipo_proceso: dx.tipo_proceso || null,
+                            orden_secuencia: dx.orden_secuencia || 1,
+                            es_paralelo: !!dx.es_paralelo,
+                            pos_x: posX,
+                            pos_y: posY,
+                            posX: posX,
+                            posY: posY,
+                            tiempo_personalizado_min: dx.tiempo_personalizado_min,
+                            costo_personalizado: dx.costo_personalizado,
+                        }
+                    };
+                });
+                const edges: FlowEdge[] = (response.data.edges || []).map((edge: any) => ({
+                    id: edge.id.toString(),
+                    source: edge.source.toString(),
+                    target: edge.target.toString(),
+                    type: edge.type || 'smoothstep',
+                    animated: edge.animated ?? true,
+                    style: edge.style || { strokeWidth: 2, stroke: '#64748b' }
+                }));
+                return { flujo: response.data.flujo, nodes, edges };
+            }
+        } catch (e) {
+            console.error('Error obteniendo flujo, fallback mock', e);
+        }
+        // Fallback con datos mock si falla la API
+        const mockNodes: FlowNode[] = [
+            {
+                id: '1',
+                type: 'customNode',
+                position: { x: 150, y: 150 },
+                data: {
+                    id_proceso: 1,
+                    nombre: 'Proceso Demo',
+                    descripcion: 'Proceso de demostración con posicionamiento automático',
+                    tiempo_base_min: 60,
+                    costo_base: 3.00,
+                    tipo_proceso: { nombre: 'Demo', color_hex: '#8b5cf6' },
+                    orden_secuencia: 1,
+                    es_paralelo: false,
+                    posX: 150,
+                    posY: 150,
+                }
+            }
+        ];
+
+        return {
+            flujo: { id: flujoId, id_estilo: estiloId, nombre: 'Flujo Demo', version: 1, costo_total_calculado: 0, tiempo_total_calculado: 0, es_actual: true, estado: 'borrador' },
+            nodes: mockNodes,
+            edges: []
+        };
+    }
+
+    static async guardarFlujo(estiloId: number, data: {
+        nombre: string;
+        descripcion?: string;
+        nodes: FlowNode[];
+        edges: FlowEdge[];
+    }): Promise<FlujoEstilo> {
+        const response = await this.request(`/estilos/${estiloId}/flujos`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+        return response.data;
+    }
+
+    // Actualizar posiciones de nodos
+    static async actualizarPosicionNodo(
+        flujoId: number,
+        nodoId: string,
+        posX: number,
+        posY: number
+    ): Promise<void> {
+        try {
+            await this.request(`/flujos/${flujoId}/posiciones`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                    nodos: [{ id: nodoId, pos_x: posX, pos_y: posY }]
+                }),
+            });
+        } catch (error) {
+            console.error('Error actualizando posición del nodo:', error);
+        }
+    }
+}
+
+// ============================================================================
+// COMPONENTE PERSONALIZADO DE NODO PARA REACTFLOW
+// ============================================================================
+
+
+
+
+const CustomNode = ({ data, selected }: { data: FlowNode['data']; selected: boolean }) => {
+    const bgColor = data.tipo_proceso?.color_hex || '#f3f4f6';
+    const [showDetailModal, setShowDetailModal] = useState(false);
+    const [showInsumosModal, setShowInsumosModal] = useState(false);
+    const [procesoDetalle, setProcesoDetalle] = useState<ProcesoDetalle | null>(null);
+    const [cargandoDetalle, setCargandoDetalle] = useState(false);
+
+    const cargarDetallesProceso = async () => {
+        if (!data.id_proceso) return;
+        
+        setCargandoDetalle(true);
+        try {
+            const detalle = await ApiService.getProcesoDetalle(data.id_proceso);
+            setProcesoDetalle(detalle);
+        } catch (error) {
+            console.error('Error cargando detalles del proceso:', error);
+            setProcesoDetalle({
+                sop: 'No se pudieron cargar los detalles del proceso.',
+                inputs: 'Información no disponible',
+                outputs: 'Información no disponible'
+            });
+        } finally {
+            setCargandoDetalle(false);
+        }
+    };
+
+    const handleVerDetalle = async (e: any) => {
+        e.stopPropagation();
+        if (!procesoDetalle) {
+            await cargarDetallesProceso();
+        }
+        setShowDetailModal(true);
+    };
+
+    const handleVerInsumos = async (e: any) => {
+        e.stopPropagation();
+        if (!procesoDetalle) {
+            await cargarDetallesProceso();
+        }
+        setShowInsumosModal(true);
+    };
+
+    return (
+        <>
+            <div
+                style={{
+                    background: 'white',
+                    border: `3px solid ${bgColor}`,
+                    borderRadius: '12px',
+                    padding: '0',
+                    minWidth: '240px',
+                    boxShadow: selected ? '0 8px 25px rgba(59, 130, 246, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.15)',
+                    position: 'relative',
+                }}
+            >
+                <Handle
+                    type="target"
+                    position={Position.Left}
+                    style={{
+                        background: bgColor,
+                        border: '2px solid white',
+                        width: '16px',
+                        height: '16px',
+                    }}
+                />
+
+                {/* Botones de acción */}
+                <div style={{
+                    position: 'absolute',
+                    top: '8px',
+                    right: '8px',
+                    display: 'flex',
+                    gap: '4px',
+                    zIndex: 10,
+                }}>
+                    <button
+                        onClick={handleVerDetalle}
+                        disabled={cargandoDetalle}
+                        style={{
+                            background: cargandoDetalle ? '#94a3b8' : '#3b82f6',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            padding: '4px 8px',
+                            fontSize: '10px',
+                            cursor: cargandoDetalle ? 'wait' : 'pointer',
+                            fontWeight: '600',
+                        }}
+                        title="Ver Detalle"
+                    >
+                        👁️ {cargandoDetalle ? '...' : 'Detalle'}
+                    </button>
+                    <button
+                        onClick={handleVerInsumos}
+                        disabled={cargandoDetalle}
+                        style={{
+                            background: cargandoDetalle ? '#94a3b8' : '#10b981',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            padding: '4px 8px',
+                            fontSize: '10px',
+                            cursor: cargandoDetalle ? 'wait' : 'pointer',
+                            fontWeight: '600',
+                        }}
+                        title="Ver Insumos"
+                    >
+                        📦 {cargandoDetalle ? '...' : 'Insumos'}
+                    </button>
+                </div>
+
+                {/* Contenido del nodo */}
+                <div style={{
+                    paddingLeft: '20px',
+                    paddingRight: '20px',
+                    paddingTop: '32px',
+                    paddingBottom: '15px',
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                        <div style={{
+                            width: '40px',
+                            height: '40px',
+                            borderRadius: '8px',
+                            background: bgColor,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            marginRight: '12px',
+                            fontSize: '18px',
+                        }}>
+                            ⚙️
+                        </div>
+                        <div>
+                            <div style={{
+                                fontWeight: '700',
+                                fontSize: '14px',
+                                color: '#1e293b',
+                                lineHeight: '1.2',
+                            }}>
+                                {data.nombre}
+                            </div>
+                            <div style={{
+                                fontSize: '11px',
+                                color: '#64748b',
+                                fontWeight: '500',
+                            }}>
+                                {data.tipo_proceso?.nombre}
+                            </div>
+                        </div>
+                    </div>
+
+                    {data.descripcion && (
+                        <div style={{
+                            fontSize: '12px',
+                            color: '#64748b',
+                            marginBottom: '12px',
+                            lineHeight: '1.3',
+                            overflow: 'hidden',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                        }}>
+                            {data.descripcion}
+                        </div>
+                    )}
+
+                    <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        marginBottom: '8px',
+                    }}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '600' }}>TIEMPO</div>
+                            <div style={{ fontSize: '14px', fontWeight: '700', color: '#3b82f6' }}>
+                                {data.tiempo_base_min || 0}min
+                            </div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '600' }}>COSTO</div>
+                            <div style={{ fontSize: '14px', fontWeight: '700', color: '#10b981' }}>
+                                ${data.costo_base || 0}
+                            </div>
+                        </div>
+                    </div>
+
+                    {data.es_paralelo && (
+                        <div style={{
+                            background: '#fef3c7',
+                            color: '#92400e',
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            fontSize: '10px',
+                            fontWeight: '600',
+                            textAlign: 'center',
+                            textTransform: 'uppercase',
+                        }}>
+                            ⚡ Proceso Paralelo
+                        </div>
+                    )}
+                </div>
+
+                <Handle
+                    type="source"
+                    position={Position.Right}
+                    style={{
+                        background: bgColor,
+                        border: '2px solid white',
+                        width: '16px',
+                        height: '16px',
+                    }}
+                />
+            </div>
+
+            {/* Modal de detalle */}
+            {showDetailModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0, 0, 0, 0.5)',
+                    zIndex: 1000,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                }}>
+                    <div style={{
+                        background: 'white',
+                        borderRadius: '16px',
+                        padding: '24px',
+                        maxWidth: '500px',
+                        width: '90%',
+                        maxHeight: '80vh',
+                        overflowY: 'auto',
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <h3 style={{ margin: 0, color: '#1e293b' }}>Detalle del Proceso</h3>
+                            <button
+                                onClick={() => setShowDetailModal(false)}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    fontSize: '24px',
+                                    cursor: 'pointer',
+                                    color: '#64748b',
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div style={{ marginBottom: '16px' }}>
+                            <h4 style={{ color: '#1e293b', marginBottom: '8px' }}>{data.nombre}</h4>
+                            <p style={{ color: '#64748b', lineHeight: '1.5' }}>{data.descripcion}</p>
+                        </div>
+
+                        {cargandoDetalle && (
+                            <div style={{ textAlign: 'center', padding: '20px' }}>
+                                <div style={{ color: '#64748b' }}>Cargando detalles del proceso...</div>
+                            </div>
+                        )}
+
+                        {procesoDetalle && !cargandoDetalle && (
+                            <div style={{ marginBottom: '16px' }}>
+                                <h4 style={{ color: '#1e293b', marginBottom: '8px' }}>SOP - Procedimiento Operativo</h4>
+                                <div style={{ 
+                                    padding: '12px', 
+                                    background: '#f8fafc', 
+                                    borderRadius: '8px', 
+                                    lineHeight: '1.5',
+                                    whiteSpace: 'pre-wrap'
+                                }}>
+                                    {procesoDetalle.sop || 'No disponible'}
+                                </div>
+                            </div>
+                        )}
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase' }}>
+                                    Tipo de Proceso
+                                </label>
+                                <div style={{ padding: '8px', background: '#f8fafc', borderRadius: '8px', marginTop: '4px' }}>
+                                    {data.tipo_proceso?.nombre}
+                                </div>
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase' }}>
+                                    Tiempo Base (min)
+                                </label>
+                                <div style={{ padding: '8px', background: '#f8fafc', borderRadius: '8px', marginTop: '4px' }}>
+                                    {data.tiempo_base_min || 0}
+                                </div>
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase' }}>
+                                    Costo Base
+                                </label>
+                                <div style={{ padding: '8px', background: '#f8fafc', borderRadius: '8px', marginTop: '4px' }}>
+                                    ${data.costo_base || 0}
+                                </div>
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase' }}>
+                                    Es Paralelo
+                                </label>
+                                <div style={{ padding: '8px', background: '#f8fafc', borderRadius: '8px', marginTop: '4px' }}>
+                                    {data.es_paralelo ? 'Sí' : 'No'}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => setShowDetailModal(false)}
+                                style={{
+                                    background: '#3b82f6',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '8px 16px',
+                                    cursor: 'pointer',
+                                    fontWeight: '600',
+                                }}
+                            >
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de insumos */}
+            {showInsumosModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0, 0, 0, 0.5)',
+                    zIndex: 1000,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                }}>
+                    <div style={{
+                        background: 'white',
+                        borderRadius: '16px',
+                        padding: '24px',
+                        maxWidth: '600px',
+                        width: '90%',
+                        maxHeight: '80vh',
+                        overflowY: 'auto',
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <h3 style={{ margin: 0, color: '#1e293b' }}>Insumos del Proceso</h3>
+                            <button
+                                onClick={() => setShowInsumosModal(false)}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    fontSize: '24px',
+                                    cursor: 'pointer',
+                                    color: '#64748b',
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div style={{ marginBottom: '16px' }}>
+                            <h4 style={{ color: '#1e293b', marginBottom: '8px' }}>Proceso: {data.nombre}</h4>
+                        </div>
+
+                        {cargandoDetalle && (
+                            <div style={{ textAlign: 'center', padding: '20px' }}>
+                                <div style={{ color: '#64748b' }}>Cargando información de insumos...</div>
+                            </div>
+                        )}
+
+                        {procesoDetalle && !cargandoDetalle && (
+                            <>
+                                <div style={{ marginBottom: '16px' }}>
+                                    <h5 style={{ color: '#1e293b', marginBottom: '8px' }}>Insumos de Entrada</h5>
+                                    {procesoDetalle.inputs.length > 0 ? (
+                                        <ul style={{ padding: '8px 16px', background: '#f0fdf4', borderRadius: '8px', margin: 0 }}>
+                                            {procesoDetalle.inputs.map((inp: string, i: number) => <li key={i} style={{ fontSize: '12px', lineHeight: '1.4' }}>{inp}</li>)}
+                                        </ul>
+                                    ) : (
+                                        <div style={{ padding: '12px', background: '#f0fdf4', borderRadius: '8px', borderLeft: '4px solid #22c55e' }}>No hay insumos registrados.</div>
+                                    )}
+                                </div>
+
+                                <div style={{ marginBottom: '16px' }}>
+                                    <h5 style={{ color: '#1e293b', marginBottom: '8px' }}>Productos de Salida</h5>
+                                    {procesoDetalle.outputs.length > 0 ? (
+                                        <ul style={{ padding: '8px 16px', background: '#fef3c7', borderRadius: '8px', margin: 0 }}>
+                                            {procesoDetalle.outputs.map((out: string, i: number) => <li key={i} style={{ fontSize: '12px', lineHeight: '1.4' }}>{out}</li>)}
+                                        </ul>
+                                    ) : (
+                                        <div style={{ padding: '12px', background: '#fef3c7', borderRadius: '8px', borderLeft: '4px solid #f59e0b' }}>No hay productos de salida registrados.</div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+
+                        <div style={{
+                            background: '#f8fafc',
+                            padding: '20px',
+                            borderRadius: '12px',
+                            textAlign: 'center',
+                        }}>
+                            <div style={{ fontSize: '48px', marginBottom: '16px' }}>📦</div>
+                            <h4 style={{ color: '#1e293b', marginBottom: '8px' }}>Insumos no configurados</h4>
+                            <p style={{ color: '#64748b' }}>
+                                Los insumos específicos para este proceso deben ser configurados desde el sistema de gestión.
+                            </p>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '20px' }}>
+                            <button
+                                onClick={() => setShowInsumosModal(false)}
+                                style={{
+                                    background: '#10b981',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '8px 16px',
+                                    cursor: 'pointer',
+                                    fontWeight: '600',
+                                }}
+                            >
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
+    );
+};
+
+// Definir tipos de nodos para ReactFlow
+const nodeTypes = {
+    customNode: CustomNode,
+};
+
+// ============================================================================
+// COMPONENTE REACTFLOW PRINCIPAL
+// ============================================================================
+
+const ReactFlowEditor: React.FC<{
+    nodes: FlowNode[];
+    edges: FlowEdge[];
+    onNodesChange: (nodes: FlowNode[]) => void;
+    onEdgesChange: (edges: FlowEdge[]) => void;
+    onConnect: (connection: Connection) => void;
+    onNodePositionChange?: (nodeId: string, position: { x: number; y: number }) => void;
+}> = ({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodePositionChange }) => {
+
+    const handleConnect = useCallback((params: Connection) => {
+        if (params.source === params.target) {
+            alert('No se puede conectar un nodo consigo mismo');
+            return;
+        }
+        onConnect(params);
+    }, [onConnect]);
+
+    const handleNodesChange = useCallback((changes: any) => {
+        // Manejar cambios en los nodos incluyendo cambios de posición
+        let hasPositionChange = false;
+        const updatedNodes = nodes.map((node: FlowNode) => {
+            const change = changes.find((c: any) => c.id === node.id && c.type === 'position');
+            if (change && change.position && !change.dragging) {
+                // Solo actualizar cuando se suelta el nodo
+                hasPositionChange = true;
+
+                // Llamar callback para actualizar posición en BD si está disponible
+                if (onNodePositionChange) {
+                    onNodePositionChange(node.id, change.position);
+                }
+
+                // Actualizar posición del nodo y datos internos
+                return {
+                    ...node,
+                    position: change.position,
+                    data: {
+                        ...node.data,
+                        posX: change.position.x,
+                        posY: change.position.y
+                    }
+                };
+            } else if (change && change.type === 'position' && change.position) {
+                // Durante el arrastre solo actualizar visualmente
+                return { ...node, position: change.position };
+            }
+
+            // Manejar otros tipos de cambios
+            const otherChange = changes.find((c: any) => c.id === node.id);
+            if (otherChange) {
+                switch (otherChange.type) {
+                    case 'select':
+                        return { ...node, selected: otherChange.selected };
+                    case 'remove':
+                        return null;
+                    default:
+                        return node;
+                }
+            }
+
+            return node;
+        }).filter(Boolean) as FlowNode[];
+
+        onNodesChange(updatedNodes);
+    }, [nodes, onNodesChange, onNodePositionChange]);
+
+    const handleEdgesChange = useCallback((changes: any) => {
+        const updatedEdges = edges.map((edge: FlowEdge) => {
+            const change = changes.find((c: any) => c.id === edge.id);
+
+            if (change) {
+                switch (change.type) {
+                    case 'select':
+                        return { ...edge, selected: change.selected };
+                    case 'remove':
+                        return null;
+                    default:
+                        return edge;
+                }
+            }
+
+            return edge;
+        }).filter(Boolean) as FlowEdge[];
+
+        onEdgesChange(updatedEdges);
+    }, [edges, onEdgesChange]);
+
+    return (
+        <div style={{ width: '100%', height: '100%' }}>
+            <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={handleNodesChange}
+                onEdgesChange={handleEdgesChange}
+                onConnect={handleConnect}
+                nodeTypes={nodeTypes}
+                connectionMode={ConnectionMode.Loose}
+                fitView
+                fitViewOptions={{ padding: 0.2 }}
+                attributionPosition="top-right"
+                defaultEdgeOptions={{
+                    animated: true,
+                    style: { strokeWidth: 2, stroke: '#64748b' },
+                    type: 'smoothstep',
+                }}
+                nodesDraggable={true}
+                nodesConnectable={true}
+                elementsSelectable={true}
+                selectNodesOnDrag={false}
+                panOnDrag={true}
+                zoomOnScroll={true}
+                zoomOnPinch={true}
+                panOnScroll={false}
+                zoomOnDoubleClick={true}
+                maxZoom={1.5}
+                minZoom={0.5}
+                defaultZoom={1}
+                style={{
+                    background: '#fafbfc',
+                }}
+            >
+                <Controls
+                    style={{
+                        backgroundColor: 'white',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '8px',
+                    }}
+                />
+                {/* <MiniMap
+                    style={{
+                        backgroundColor: 'white',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '8px',
+                    }}
+                    nodeColor={(node) => {
+                        return node.data?.tipo_proceso?.color_hex || '#f3f4f6';
+                    }}
+                /> */}
+                <Background
+                />
+            </ReactFlow>
+        </div>
+    );
+};
+
+// ============================================================================
+// COMPONENTE PRINCIPAL MEJORADO
+// ============================================================================
+
+const SistemaTextilApp: React.FC = () => {
+    // Estados principales
+    const [estilos, setEstilos] = useState<Estilo[]>([]);
+    const [colores, setColores] = useState<Color[]>([]);
+    const [procesos, setProcesos] = useState<Proceso[]>([]);
+    const [selectedEstilo, setSelectedEstilo] = useState<Estilo | null>(null);
+    const [activeView, setActiveView] = useState<'list' | 'flow' | 'bom'>('list');
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
+
+    // Estados para BOM
+    const [bomData, setBomData] = useState<{
+        bom_items: BomItem[],
+        resumen: { total_items: number; costo_total_materiales: number; items_criticos: number }
+    } | null>(null);
+    const [loadingBom, setLoadingBom] = useState(false);
+
+    // Estados para flujo de procesos
+    const [flujos, setFlujos] = useState<FlujoEstilo[]>([]);
+    const [selectedFlujo, setSelectedFlujo] = useState<FlujoEstilo | null>(null);
+    const [nodes, setNodes] = useState<FlowNode[]>([]);
+    const [edges, setEdges] = useState<FlowEdge[]>([]);
+    const [guardandoFlujo, setGuardandoFlujo] = useState(false);
+
+    // Cargar datos iniciales
+    useEffect(() => {
+        const cargarDatos = async () => {
+            try {
+                setLoading(true);
+                const [estilosData, coloresData, procesosData] = await Promise.all([
+                    ApiService.getEstilos(),
+                    ApiService.getColores(),
+                    ApiService.getProcesos(),
+                ]);
+
+                setEstilos(Array.isArray(estilosData) ? estilosData : []);
+                setColores(Array.isArray(coloresData) ? coloresData : []);
+                setProcesos(Array.isArray(procesosData) ? procesosData : []);
+
+                console.log('Datos cargados:', {
+                    estilos: Array.isArray(estilosData) ? estilosData.length : 'No es array',
+                    colores: Array.isArray(coloresData) ? coloresData.length : 'No es array',
+                    procesos: Array.isArray(procesosData) ? procesosData.length : 'No es array'
+                });
+            } catch (error) {
+                console.error('Error cargando datos:', error);
+                alert('Error al cargar datos del servidor');
+                setEstilos([]);
+                setColores([]);
+                setProcesos([]);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        cargarDatos();
+    }, []);
+
+    // Cargar BOM cuando se selecciona un estilo
+    useEffect(() => {
+        const cargarBOM = async () => {
+            if (!selectedEstilo) {
+                setBomData(null);
+                return;
+            }
+
+            try {
+                setLoadingBom(true);
+                const bomData = await ApiService.getBOM(selectedEstilo.id);
+                console.log('BOM data received:', bomData);
+
+                if (bomData && bomData.bom_items && Array.isArray(bomData.bom_items)) {
+                    setBomData(bomData);
+                } else {
+                    console.warn('BOM data format invalid, using empty structure');
+                    setBomData({ bom_items: [], resumen: { total_items: 0, costo_total_materiales: 0, items_criticos: 0 } });
+                }
+            } catch (error) {
+                console.error('Error cargando BOM:', error);
+                setBomData({ bom_items: [], resumen: { total_items: 0, costo_total_materiales: 0, items_criticos: 0 } });
+            } finally {
+                setLoadingBom(false);
+            }
+        };
+
+        cargarBOM();
+    }, [selectedEstilo]);
+
+    // Cargar flujos cuando se selecciona un estilo
+    useEffect(() => {
+        const cargarFlujos = async () => {
+            if (!selectedEstilo) {
+                setFlujos([]);
+                return;
+            }
+
+            try {
+                const flujosData = await ApiService.getFlujosByEstilo(selectedEstilo.id);
+                setFlujos(flujosData);
+
+                const flujoActual = flujosData.find(f => f.es_actual);
+                if (flujoActual) {
+                    await cargarFlujo(flujoActual);
+                }
+            } catch (error) {
+                console.error('Error cargando flujos:', error);
+                setFlujos([]);
+            }
+        };
+
+        cargarFlujos();
+    }, [selectedEstilo]);
+
+    const onConnect = useCallback(
+        (connection: { source: string; target: string }) => {
+            if (connection.source === connection.target) {
+                alert('No se puede conectar un nodo consigo mismo');
+                return;
+            }
+
+            const newEdge: FlowEdge = {
+                id: `edge-${connection.source}-${connection.target}-${Date.now()}`,
+                source: connection.source,
+                target: connection.target,
+                type: 'smoothstep',
+                animated: true,
+                style: { strokeWidth: 2, stroke: '#64748b' },
+            };
+            setEdges((eds: FlowEdge[]) => [...eds, newEdge]);
+        },
+        []
+    );
+
+    const cargarFlujo = async (flujo: FlujoEstilo) => {
+        if (!selectedEstilo) return;
+
+        try {
+            const flujoData = await ApiService.getFlujo(selectedEstilo.id, flujo.id);
+            setSelectedFlujo(flujo);
+
+            // Asegurar que los nodos tengan el tipo correcto y usen posX/posY de la BD
+            const nodosConTipo: FlowNode[] = flujoData.nodes.map(node => ({
+                ...node,
+                type: 'customNode',
+                position: {
+                    x: node.data.posX || node.position.x,
+                    y: node.data.posY || node.position.y
+                }
+            }));
+
+            setNodes(nodosConTipo);
+            setEdges(flujoData.edges);
+        } catch (error) {
+            console.error('Error cargando flujo:', error);
+            alert('Error al cargar el flujo');
+        }
+    };
+
+    const agregarProceso = (proceso: Proceso) => {
+        // Verificar si el proceso ya existe en el flujo
+        const isAlreadyConnected = nodes.some(
+            (node: FlowNode) => node.data.id_proceso === proceso.id
+        );
+
+        if (isAlreadyConnected) {
+            alert('Ya existe el proceso seleccionado dentro del flujo');
+            return;
+        }
+
+        const newNode: FlowNode = {
+            id: proceso.id.toString(),
+            type: 'customNode',
+            position: {
+                // Usar posX/posY si están disponibles, sino usar posición inteligente
+                x: proceso.posX || (nodes.length > 0 ? 20 * (nodes.length + 1) + 100 : 100),
+                y: proceso.posY || (nodes.length > 0 ? 15 * (nodes.length + 1) + 50 : 50)
+            },
+            data: {
+                id_proceso: proceso.id,
+                nombre: proceso.nombre,
+                descripcion: proceso.descripcion,
+                tiempo_base_min: proceso.tiempo_base_min,
+                costo_base: proceso.costo_base,
+                tipo_proceso: proceso.tipo_proceso,
+                orden_secuencia: nodes.length + 1,
+                es_paralelo: proceso.es_paralelo,
+                posX: proceso.posX || (nodes.length > 0 ? 20 * (nodes.length + 1) + 100 : 100),
+                posY: proceso.posY || (nodes.length > 0 ? 15 * (nodes.length + 1) + 50 : 50),
+            },
+        };
+
+        setNodes((nds: FlowNode[]) => [...nds, newNode]);
+    };
+
+    // Función para actualizar posición en la BD cuando se mueve un nodo
+    const handleNodePositionChange = useCallback(async (nodeId: string, position: { x: number; y: number }) => {
+        if (!selectedEstilo) return;
+
+        const node = nodes.find((n: FlowNode) => n.id === nodeId);
+        if (!node) return;
+
+        try {
+            // Llamar a la API para actualizar la posición en la BD
+            await ApiService.actualizarPosicionNodo(
+                selectedFlujo?.id || 1,
+                nodeId,
+                position.x,
+                position.y
+            );
+        } catch (error) {
+            console.error('Error actualizando posición del nodo:', error);
+        }
+    }, [selectedEstilo, nodes]);
+
+    const guardarFlujo = async () => {
+        if (!selectedEstilo || nodes.length === 0) {
+            alert('Agrega al menos un proceso antes de guardar');
+            return;
+        }
+
+        try {
+            setGuardandoFlujo(true);
+            const flujoData = {
+                nombre: `Flujo ${selectedEstilo.nombre} - ${new Date().toLocaleDateString()}`,
+                descripcion: `Flujo de procesos para el estilo ${selectedEstilo.nombre}`,
+                nodes,
+                edges,
+            };
+
+            const nuevoFlujo = await ApiService.guardarFlujo(selectedEstilo.id, flujoData);
+            setFlujos((prev: FlujoEstilo[]) => [...prev, nuevoFlujo]);
+            alert('Flujo guardado exitosamente');
+        } catch (error) {
+            console.error('Error guardando flujo:', error);
+            alert('Error al guardar el flujo');
+        } finally {
+            setGuardandoFlujo(false);
+        }
+    };
+
+    const crearNuevoFlujo = () => {
+        setSelectedFlujo(null);
+        setNodes([]);
+        setEdges([]);
+    };
+
+    const estilosFiltrados = Array.isArray(estilos) ? estilos.filter(estilo =>
+        estilo && estilo.nombre && estilo.codigo &&
+        (estilo.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            estilo.codigo.toLowerCase().includes(searchTerm.toLowerCase()))
+    ) : [];
+
+    if (loading) {
+        return (
+            <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                height: '100vh',
+                fontFamily: 'system-ui, -apple-system, sans-serif',
+                background: '#f8fafc',
+            }}>
+                <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚙️</div>
+                    <div style={{ fontSize: '18px', color: '#64748b' }}>Cargando sistema textil...</div>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div style={{
+            fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+            maxWidth: '1400px',
+            margin: '0 auto',
+            padding: '20px',
+            background: '#f8fafc',
+            minHeight: '100vh',
+        }}>
+            {/* Header mejorado inspirado en el HTML */}
+            <header style={{
+                textAlign: 'center',
+                marginBottom: '32px',
+                background: 'white',
+                padding: '32px',
+                borderRadius: '16px',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+            }}>
+                <h1 style={{
+                    fontSize: '36px',
+                    fontWeight: '800',
+                    color: '#1e293b',
+                    marginBottom: '8px',
+                    background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                }}>
+                    🧵 Sistema de Gestión Textil Avanzado
+                </h1>
+                <p style={{
+                    color: '#64748b',
+                    fontSize: '18px',
+                    margin: '0'
+                }}>
+                    Gestión integral de estilos, procesos y materiales con ReactFlow
+                </p>
+            </header>
+
+            {/* Navigation mejorada */}
+            <div style={{ marginBottom: '24px' }}>
+                <div style={{
+                    display: 'flex',
+                    gap: '4px',
+                    background: 'white',
+                    borderRadius: '12px',
+                    padding: '6px',
+                    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+                    border: '1px solid #e2e8f0',
+                }}>
+                    <button
+                        onClick={() => setActiveView('list')}
+                        style={{
+                            padding: '12px 20px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontWeight: '600',
+                            fontSize: '14px',
+                            background: activeView === 'list' ? '#3b82f6' : 'transparent',
+                            color: activeView === 'list' ? 'white' : '#64748b',
+                            transition: 'all 0.2s',
+                        }}
+                    >
+                        📋 Catálogo de Estilos
+                    </button>
+                    {selectedEstilo && (
+                        <>
+                            <button
+                                onClick={() => setActiveView('flow')}
+                                style={{
+                                    padding: '12px 20px',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontWeight: '600',
+                                    fontSize: '14px',
+                                    background: activeView === 'flow' ? '#3b82f6' : 'transparent',
+                                    color: activeView === 'flow' ? 'white' : '#64748b',
+                                    transition: 'all 0.2s',
+                                }}
+                            >
+                                🔀 Flujo Interactivo de Procesos
+                            </button>
+                            <button
+                                onClick={() => setActiveView('bom')}
+                                style={{
+                                    padding: '12px 20px',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontWeight: '600',
+                                    fontSize: '14px',
+                                    background: activeView === 'bom' ? '#3b82f6' : 'transparent',
+                                    color: activeView === 'bom' ? 'white' : '#64748b',
+                                    transition: 'all 0.2s',
+                                }}
+                            >
+                                📦 Lista de Materiales (BOM)
+                            </button>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {/* Content - Lista de Estilos */}
+            {activeView === 'list' && (
+                <div>
+                    <div style={{ marginBottom: '24px' }}>
+                        <input
+                            type="text"
+                            placeholder="🔍 Buscar estilos por nombre o código..."
+                            value={searchTerm}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
+                            style={{
+                                width: '100%',
+                                padding: '16px 20px',
+                                border: '2px solid #e2e8f0',
+                                borderRadius: '12px',
+                                fontSize: '16px',
+                                background: 'white',
+                                transition: 'border-color 0.2s',
+                            }}
+                            onFocus={(e: React.FocusEvent<HTMLInputElement>) => e.currentTarget.style.borderColor = '#3b82f6'}
+                            onBlur={(e: React.FocusEvent<HTMLInputElement>) => e.currentTarget.style.borderColor = '#e2e8f0'}
+                        />
+                    </div>
+
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))',
+                        gap: '24px'
+                    }}>
+                        {estilosFiltrados.map((estilo) => (
+                            <div
+                                key={estilo.id}
+                                onClick={() => setSelectedEstilo(estilo)}
+                                style={{
+                                    background: 'white',
+                                    borderRadius: '16px',
+                                    border: '2px solid',
+                                    borderColor: selectedEstilo?.id === estilo.id ? '#3b82f6' : '#e2e8f0',
+                                    padding: '24px',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.3s',
+                                    boxShadow: selectedEstilo?.id === estilo.id ?
+                                        '0 8px 25px rgba(59, 130, 246, 0.15)' :
+                                        '0 1px 3px rgba(0, 0, 0, 0.1)',
+                                }}
+                            >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '16px' }}>
+                                    <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#1e293b', margin: 0 }}>
+                                        {estilo.nombre}
+                                    </h3>
+                                    <span style={{
+                                        padding: '4px 8px',
+                                        borderRadius: '9999px',
+                                        fontSize: '12px',
+                                        fontWeight: 'medium',
+                                        background: estilo.estado === 'activo' ? '#d1fae5' :
+                                            estilo.estado === 'desarrollo' ? '#dbeafe' : '#f3f4f6',
+                                        color: estilo.estado === 'activo' ? '#065f46' :
+                                            estilo.estado === 'desarrollo' ? '#1e40af' : '#374151',
+                                    }}>
+                                        {estilo.estado}
+                                    </span>
+                                </div>
+
+                                <div style={{ marginBottom: '16px' }}>
+                                    <p style={{ fontSize: '14px', color: '#64748b', margin: '4px 0' }}>
+                                        Código: {estilo.codigo}
+                                    </p>
+                                    <p style={{ fontSize: '14px', color: '#64748b', margin: '4px 0' }}>
+                                        Temporada: {estilo.temporada} {estilo.año_produccion}
+                                    </p>
+                                    {estilo.costo_objetivo && (
+                                        <p style={{ fontSize: '14px', color: '#10b981', margin: '4px 0' }}>
+                                            Costo objetivo: ${estilo.costo_objetivo}
+                                        </p>
+                                    )}
+                                </div>
+
+                                {estilo.descripcion && (
+                                    <p style={{
+                                        fontSize: '14px',
+                                        color: '#64748b',
+                                        lineHeight: '1.4',
+                                        overflow: 'hidden',
+                                        display: '-webkit-box',
+                                        WebkitLineClamp: 3,
+                                        WebkitBoxOrient: 'vertical',
+                                    }}>
+                                        {estilo.descripcion}
+                                    </p>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+
+                    {estilosFiltrados.length === 0 && (
+                        <div style={{ textAlign: 'center', padding: '64px', background: 'white', borderRadius: '16px' }}>
+                            <div style={{ fontSize: '64px', marginBottom: '20px' }}>🔍</div>
+                            <h3 style={{ fontSize: '24px', fontWeight: '600', color: '#1e293b', marginBottom: '12px' }}>
+                                No se encontraron estilos
+                            </h3>
+                            <p style={{ color: '#64748b', fontSize: '16px' }}>
+                                {searchTerm ? 'Intenta con otros términos de búsqueda' : 'No hay estilos disponibles'}
+                            </p>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Content - Flujo de Procesos */}
+            {activeView === 'flow' && selectedEstilo && (
+                <div style={{ height: '70vh', display: 'flex', gap: '20px' }}>
+                    {/* Panel lateral */}
+                    <div style={{
+                        width: '380px',
+                        background: 'white',
+                        borderRadius: '16px',
+                        border: '2px solid #e2e8f0',
+                        padding: '20px',
+                        overflowY: 'auto',
+                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                    }}>
+                        <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '16px', color: '#1e293b' }}>
+                            🔀 Flujo: {selectedEstilo.nombre}
+                        </h2>
+
+                        {/* Acciones */}
+                        <div style={{ marginBottom: '20px', display: 'flex', gap: '8px' }}>
+                            <button
+                                onClick={crearNuevoFlujo}
+                                style={{
+                                    flex: 1,
+                                    background: '#10b981',
+                                    color: 'white',
+                                    padding: '10px 16px',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                }}
+                            >
+                                ➕ Nuevo
+                            </button>
+                            <button
+                                onClick={guardarFlujo}
+                                disabled={guardandoFlujo || nodes.length === 0}
+                                style={{
+                                    flex: 1,
+                                    background: guardandoFlujo || nodes.length === 0 ? '#94a3b8' : '#3b82f6',
+                                    color: 'white',
+                                    padding: '10px 16px',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    cursor: guardandoFlujo || nodes.length === 0 ? 'not-allowed' : 'pointer',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                }}
+                            >
+                                💾 {guardandoFlujo ? 'Guardando...' : 'Guardar'}
+                            </button>
+                        </div>
+
+                        {/* Lista de procesos disponibles */}
+                        <div>
+                            <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '12px', color: '#1e293b' }}>
+                                ⚙️ Procesos Disponibles
+                            </h3>
+                            <div style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '8px',
+                                maxHeight: '400px',
+                                overflowY: 'auto'
+                            }}>
+                                {procesos.map((proceso) => (
+                                    <div
+                                        key={proceso.id}
+                                        onClick={() => agregarProceso(proceso)}
+                                        style={{
+                                            padding: '12px',
+                                            border: '1px solid #e2e8f0',
+                                            borderRadius: '8px',
+                                            cursor: 'pointer',
+                                            background: 'white',
+                                            transition: 'all 0.2s',
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = '#f8fafc';
+                                            e.currentTarget.style.borderColor = '#3b82f6';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = 'white';
+                                            e.currentTarget.style.borderColor = '#e2e8f0';
+                                        }}
+                                    >
+                                        <div style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            marginBottom: '6px',
+                                        }}>
+                                            <div style={{
+                                                fontWeight: '600',
+                                                fontSize: '14px',
+                                                color: '#1e293b',
+                                            }}>
+                                                {proceso.nombre}
+                                            </div>
+                                            <div style={{
+                                                background: proceso.tipo_proceso?.color_hex,
+                                                padding: '2px 6px',
+                                                borderRadius: '4px',
+                                                fontSize: '10px',
+                                                fontWeight: '600',
+                                                textTransform: 'uppercase',
+                                                color: '#1f2937',
+                                            }}>
+                                                {proceso.tipo_proceso?.nombre}
+                                            </div>
+                                        </div>
+                                        <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '6px' }}>
+                                            {proceso.codigo}
+                                        </div>
+                                        <div style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            fontSize: '12px',
+                                            fontWeight: '600',
+                                        }}>
+                                            <span style={{ color: '#3b82f6' }}>⏱️ {proceso.tiempo_base_min}min</span>
+                                            <span style={{ color: '#059669' }}>${proceso.costo_base}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Editor visual simplificado */}
+                    <div style={{
+                        flex: 1,
+                        background: 'white',
+                        borderRadius: '16px',
+                        border: '2px solid #e2e8f0',
+                        overflow: 'hidden',
+                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                    }}>
+                        <ReactFlowProvider>
+                            <ReactFlowEditor
+                                nodes={nodes}
+                                edges={edges}
+                                onNodesChange={setNodes}
+                                onEdgesChange={setEdges}
+                                onConnect={onConnect}
+                                onNodePositionChange={handleNodePositionChange}
+                            />
+                        </ReactFlowProvider>
+                    </div>
+                </div>
+            )}
+
+            {/* Content - BOM */}
+            {activeView === 'bom' && selectedEstilo && (
+                <div>
+                    <div style={{ marginBottom: '24px' }}>
+                        <h2 style={{
+                            fontSize: '28px',
+                            fontWeight: '700',
+                            color: '#1e293b',
+                            marginBottom: '8px'
+                        }}>
+                            📦 Lista de Materiales - {selectedEstilo.nombre}
+                        </h2>
+                        <p style={{ color: '#64748b', fontSize: '16px' }}>
+                            Lista completa de materiales requeridos para la producción
+                        </p>
+                    </div>
+
+                    {loadingBom ? (
+                        <div style={{ textAlign: 'center', padding: '64px', background: 'white', borderRadius: '16px' }}>
+                            <div style={{ fontSize: '48px', marginBottom: '16px' }}>⏳</div>
+                            <p style={{ color: '#64748b', fontSize: '16px' }}>Cargando lista de materiales...</p>
+                        </div>
+                    ) : bomData && bomData.bom_items && Array.isArray(bomData.bom_items) && bomData.bom_items.length > 0 ? (
+                        <>
+                            {/* Resumen mejorado */}
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                                gap: '20px',
+                                marginBottom: '24px'
+                            }}>
+                                <div style={{
+                                    background: 'linear-gradient(135deg, #dbeafe, #bfdbfe)',
+                                    padding: '24px',
+                                    borderRadius: '16px',
+                                    border: '1px solid #93c5fd',
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                                        <span style={{ marginRight: '12px', fontSize: '24px' }}>📦</span>
+                                        <span style={{ fontSize: '16px', fontWeight: '600', color: '#1e40af' }}>
+                                            Total de Materiales
+                                        </span>
+                                    </div>
+                                    <div style={{ fontSize: '32px', fontWeight: '800', color: '#1e40af' }}>
+                                        {bomData?.resumen?.total_items || 0}
+                                    </div>
+                                </div>
+
+                                <div style={{
+                                    background: 'linear-gradient(135deg, #d1fae5, #a7f3d0)',
+                                    padding: '24px',
+                                    borderRadius: '16px',
+                                    border: '1px solid #6ee7b7',
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                                        <span style={{ marginRight: '12px', fontSize: '24px' }}>💰</span>
+                                        <span style={{ fontSize: '16px', fontWeight: '600', color: '#065f46' }}>
+                                            Costo Total Materiales
+                                        </span>
+                                    </div>
+                                    <div style={{ fontSize: '32px', fontWeight: '800', color: '#065f46' }}>
+                                        ${(bomData?.resumen?.costo_total_materiales || 0).toFixed(2)}
+                                    </div>
+                                </div>
+
+                                <div style={{
+                                    background: 'linear-gradient(135deg, #fce7f3, #fbcfe8)',
+                                    padding: '24px',
+                                    borderRadius: '16px',
+                                    border: '1px solid #f9a8d4',
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                                        <span style={{ marginRight: '12px', fontSize: '24px' }}>⚠️</span>
+                                        <span style={{ fontSize: '16px', fontWeight: '600', color: '#be185d' }}>
+                                            Materiales Críticos
+                                        </span>
+                                    </div>
+                                    <div style={{ fontSize: '32px', fontWeight: '800', color: '#be185d' }}>
+                                        {bomData?.resumen?.items_criticos || 0}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Tabla BOM mejorada */}
+                            <div style={{
+                                background: 'white',
+                                borderRadius: '16px',
+                                overflow: 'hidden',
+                                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                                border: '2px solid #e2e8f0',
+                            }}>
+                                <div style={{ overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                        <thead style={{ background: '#f8fafc' }}>
+                                            <tr>
+                                                <th style={{
+                                                    padding: '16px 24px',
+                                                    textAlign: 'left',
+                                                    fontSize: '14px',
+                                                    fontWeight: '700',
+                                                    color: '#374151',
+                                                    textTransform: 'uppercase',
+                                                    letterSpacing: '0.5px',
+                                                    borderBottom: '2px solid #e2e8f0',
+                                                }}>
+                                                    Material
+                                                </th>
+                                                <th style={{
+                                                    padding: '16px 24px',
+                                                    textAlign: 'left',
+                                                    fontSize: '14px',
+                                                    fontWeight: '700',
+                                                    color: '#374151',
+                                                    textTransform: 'uppercase',
+                                                    letterSpacing: '0.5px',
+                                                    borderBottom: '2px solid #e2e8f0',
+                                                }}>
+                                                    Cantidad Base
+                                                </th>
+                                                <th style={{
+                                                    padding: '16px 24px',
+                                                    textAlign: 'left',
+                                                    fontSize: '14px',
+                                                    fontWeight: '700',
+                                                    color: '#374151',
+                                                    textTransform: 'uppercase',
+                                                    letterSpacing: '0.5px',
+                                                    borderBottom: '2px solid #e2e8f0',
+                                                }}>
+                                                    Costo Total
+                                                </th>
+                                                <th style={{
+                                                    padding: '16px 24px',
+                                                    textAlign: 'left',
+                                                    fontSize: '14px',
+                                                    fontWeight: '700',
+                                                    color: '#374151',
+                                                    textTransform: 'uppercase',
+                                                    letterSpacing: '0.5px',
+                                                    borderBottom: '2px solid #e2e8f0',
+                                                }}>
+                                                    Estado
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {(bomData.bom_items || []).map((item, index) => (
+                                                <tr
+                                                    key={item.id}
+                                                    style={{
+                                                        borderBottom: '1px solid #f1f5f9',
+                                                        background: index % 2 === 0 ? 'white' : '#fafbfc',
+                                                    }}
+                                                >
+                                                    <td style={{ padding: '20px 24px' }}>
+                                                        <div style={{ fontWeight: '600', fontSize: '14px', color: '#1e293b', marginBottom: '4px' }}>
+                                                            {item.material.nombre}
+                                                        </div>
+                                                        <div style={{ fontSize: '12px', color: '#64748b' }}>
+                                                            {item.material.codigo}
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: '20px 24px', fontSize: '14px', color: '#1e293b', fontWeight: '600' }}>
+                                                        {item.cantidad_base} {item.material.unidad_medida.codigo}
+                                                    </td>
+                                                    <td style={{ padding: '20px 24px', fontSize: '16px', fontWeight: '700', color: '#059669' }}>
+                                                        ${(item.cantidad_base * item.material.costo_unitario).toFixed(2)}
+                                                    </td>
+                                                    <td style={{ padding: '20px 24px' }}>
+                                                        {item.es_critico ? (
+                                                            <span style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                padding: '4px 12px',
+                                                                fontSize: '12px',
+                                                                fontWeight: 'bold',
+                                                                borderRadius: '9999px',
+                                                                background: '#fecaca',
+                                                                color: '#dc2626',
+                                                            }}>
+                                                                ⚠️ Crítico
+                                                            </span>
+                                                        ) : (
+                                                            <span style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                padding: '4px 12px',
+                                                                fontSize: '12px',
+                                                                fontWeight: 'bold',
+                                                                borderRadius: '9999px',
+                                                                background: '#d1fae5',
+                                                                color: '#065f46',
+                                                            }}>
+                                                                ✅ Normal
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <div style={{
+                            textAlign: 'center',
+                            padding: '64px',
+                            background: 'white',
+                            borderRadius: '16px',
+                            border: '2px solid #e2e8f0',
+                        }}>
+                            <div style={{ fontSize: '64px', marginBottom: '20px' }}>📦</div>
+                            <h3 style={{
+                                fontSize: '24px',
+                                fontWeight: '600',
+                                color: '#1e293b',
+                                marginBottom: '12px'
+                            }}>
+                                Sin lista de materiales
+                            </h3>
+                            <p style={{ color: '#64748b', fontSize: '16px' }}>
+                                Este estilo no tiene materiales definidos en su BOM
+                            </p>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default SistemaTextilApp;
