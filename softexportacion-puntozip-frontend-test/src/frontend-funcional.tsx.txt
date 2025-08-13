@@ -6,15 +6,15 @@ import {
     Background,
     addEdge,
     Connection,
-    Edge,
-    Node,
     ConnectionMode,
     Handle,
     Position,
-    NodeProps,
     ReactFlowProvider,
     MarkerType,
 } from '@xyflow/react';
+
+import type { Node, Edge, NodeProps } from '@xyflow/react';
+
 import '@xyflow/react/dist/style.css';
 
 // ============================================================================
@@ -165,7 +165,7 @@ class ApiService {
     // Estilos
     static async getEstilos(): Promise<Estilo[]> {
         try {
-            const response = await this.request('/estilos');
+            const response = await this.request('/estiloss');
             return response.success && Array.isArray(response.data) ? response.data : [];
         } catch (error) {
             console.error('Error obteniendo estilos:', error);
@@ -582,7 +582,7 @@ const CustomNode = ({ data, selected }: { data: FlowNode['data']; selected: bool
 
     const cargarDetallesProceso = async () => {
         if (!data.id_proceso) return;
-        
+
         setCargandoDetalle(true);
         try {
             const detalle = await ApiService.getProcesoDetalle(data.id_proceso);
@@ -591,8 +591,8 @@ const CustomNode = ({ data, selected }: { data: FlowNode['data']; selected: bool
             console.error('Error cargando detalles del proceso:', error);
             setProcesoDetalle({
                 sop: 'No se pudieron cargar los detalles del proceso.',
-                inputs: 'Información no disponible',
-                outputs: 'Información no disponible'
+                // inputs: 'Información no disponible',
+                // outputs: 'Información no disponible'
             });
         } finally {
             setCargandoDetalle(false);
@@ -839,10 +839,10 @@ const CustomNode = ({ data, selected }: { data: FlowNode['data']; selected: bool
                         {procesoDetalle && !cargandoDetalle && (
                             <div style={{ marginBottom: '16px' }}>
                                 <h4 style={{ color: '#1e293b', marginBottom: '8px' }}>SOP - Procedimiento Operativo</h4>
-                                <div style={{ 
-                                    padding: '12px', 
-                                    background: '#f8fafc', 
-                                    borderRadius: '8px', 
+                                <div style={{
+                                    padding: '12px',
+                                    background: '#f8fafc',
+                                    borderRadius: '8px',
                                     lineHeight: '1.5',
                                     whiteSpace: 'pre-wrap'
                                 }}>
@@ -1141,7 +1141,6 @@ const ReactFlowEditor: React.FC<{
                 zoomOnDoubleClick={true}
                 maxZoom={1.5}
                 minZoom={0.5}
-                defaultZoom={1}
                 style={{
                     background: '#fafbfc',
                 }}
