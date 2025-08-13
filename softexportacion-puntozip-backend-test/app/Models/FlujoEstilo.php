@@ -10,7 +10,7 @@ class FlujoEstilo extends Model
 {
     protected $table = 'flujos_estilos';
     protected $primaryKey = 'id';
-    
+
     protected $fillable = [
         'id_estilo',
         'nombre',
@@ -112,7 +112,7 @@ class FlujoEstilo extends Model
         $nodos = $this->nodos()->with(['proceso.tipoProceso'])->get();
         $conexiones = $this->conexiones()->with(['nodoOrigen', 'nodoDestino'])->get();
 
-        $nodosReactFlow = $nodos->map(function($nodo) {
+        $nodosReactFlow = $nodos->map(function ($nodo) {
             return [
                 'id' => (string)$nodo->id,
                 'type' => 'customNode',
@@ -142,7 +142,7 @@ class FlujoEstilo extends Model
             ];
         });
 
-        $conexionesReactFlow = $conexiones->map(function($conexion) {
+        $conexionesReactFlow = $conexiones->map(function ($conexion) {
             return [
                 'id' => (string)$conexion->id,
                 'source' => (string)$conexion->id_nodo_origen,
@@ -199,7 +199,7 @@ class FlujoEstilo extends Model
     public function calcularTotales()
     {
         $nodos = $this->nodos()->with('proceso')->get();
-        
+
         $costoTotal = 0;
         $tiempoTotal = 0;
         $tiempoParalelo = 0;
@@ -281,13 +281,17 @@ class FlujoEstilo extends Model
 
         // Validar que todos los nodos tengan conexiones (excepto inicio y final)
         foreach ($nodos as $nodo) {
-            if (!$nodo->es_punto_inicio && !$nodo->es_punto_final) {
-                $tieneEntrada = $conexiones->where('id_nodo_destino', $nodo->id)->isNotEmpty();
+            if (
+                // !$nodo->es_punto_inicio
+                // &&
+                !$nodo->es_punto_final
+            ) {
+                // $tieneEntrada = $conexiones->where('id_nodo_destino', $nodo->id)->isNotEmpty();
                 $tieneSalida = $conexiones->where('id_nodo_origen', $nodo->id)->isNotEmpty();
 
-                if (!$tieneEntrada) {
-                    $errores[] = "El proceso '{$nodo->proceso->nombre}' no tiene conexiones de entrada";
-                }
+                // if (!$tieneEntrada) {
+                // $errores[] = "El proceso '{$nodo->proceso->nombre}' no tiene conexiones de entrada";
+                // }
 
                 if (!$tieneSalida) {
                     $errores[] = "El proceso '{$nodo->proceso->nombre}' no tiene conexiones de salida";
@@ -296,14 +300,14 @@ class FlujoEstilo extends Model
         }
 
         // Validar dependencias de procesos que requieren color
-        $procesosConColor = $nodos->filter(function($nodo) {
+        $procesosConColor = $nodos->filter(function ($nodo) {
             return $nodo->proceso->requiere_color;
         });
 
         foreach ($procesosConColor as $nodo) {
             // Verificar que tenga materiales de tipo tinte en el BOM del estilo
             $tieneTintes = $this->estilo->bomItems()
-                ->whereHas('material', function($query) {
+                ->whereHas('material', function ($query) {
                     $query->where('tipo_material', 'tinte');
                 })
                 ->exists();
@@ -345,7 +349,7 @@ class FlujoEstilo extends Model
     public function duplicarConNuevaVersion()
     {
         $nuevaVersion = self::where('id_estilo', $this->id_estilo)->max('version') + 1;
-        
+
         // Crear nuevo flujo
         $nuevoFlujo = self::create([
             'id_estilo' => $this->id_estilo,
