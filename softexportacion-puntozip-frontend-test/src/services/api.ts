@@ -495,12 +495,49 @@ class ApiService {
     }
 
     static async calcularBOMPorVariante(estiloId: number, data: {
-        color_id: number;
+        color_id?: number;
         talla_id: number;
         cantidad: number;
-    }): Promise<any> {
-        const response = await this.request<any>('POST', `/estilos/${estiloId}/bom/calcular-variante`, data);
-        return response.data;
+    }): Promise<{
+        bom_calculado: any[];
+        resumen: {
+            variante: {
+                estilo_id: number;
+                estilo_nombre: string;
+                talla_id: number;
+                talla_nombre: string;
+                multiplicador_talla: number;
+                color_id?: number;
+                cantidad_piezas: number;
+            };
+            costos: {
+                total_materiales: number;
+                costo_por_pieza: number;
+            };
+            disponibilidad: {
+                stock_suficiente: boolean;
+                items_sin_stock: number;
+                total_items: number;
+            };
+            alertas: any[];
+        };
+    }> {
+        // Transformar al formato esperado por el backend
+        const backendData = {
+            id_talla: data.talla_id,
+            id_color: data.color_id,
+            cantidad_piezas: data.cantidad
+        };
+        
+        const response = await this.request<any>('POST', `/estilos/${estiloId}/bom/calcular-variante`, backendData);
+        console.log("response calcularBOMPorVariante", response);
+        
+        // El backend devuelve: { success: true, data: { bom_calculado: [...], resumen: {...} } }
+        if (response.success && response.data) {
+            return response.data;
+        }
+        
+        throw new Error('Error en el cálculo de BOM por variante');
     }
 
     // ========================================================================

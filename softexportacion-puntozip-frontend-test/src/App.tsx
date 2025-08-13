@@ -1,16 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
-    ReactFlow,
-    Controls,
-    Background,
-    type Connection,
-    ConnectionMode,
-    ReactFlowProvider,
+  ReactFlow,
+  Controls,
+  Background,
+  type Connection,
+  ConnectionMode,
+  ReactFlowProvider,
+  type NodeChange,
+  type EdgeChange,
+  applyNodeChanges,
+  applyEdgeChanges,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { useEstilos, useBOMEstilo, useProcesos, useColores, useTallasDisponibles, useCalcularVarianteTextil } from './hooks/useApi';
+import { useEstilos, useBOMEstilo, useProcesos, useColores, useTallasDisponibles, useCalcularVarianteTextil, useCalcularBOMPorVariante } from './hooks/useApi';
 import CustomNode from './components/CustomNode';
 import type { Estilo, BomItem, Proceso, FlujoEstilo, FlowNode, FlowEdge, Color, Talla, CalculoVariante } from './types';
 import ApiService from './services/api';
@@ -51,69 +55,37 @@ const ReactFlowEditor: React.FC<{
     onConnect(params);
   }, [onConnect]);
 
-      const handleNodesChange = useCallback((changes: any) => {
-        // Manejar cambios en los nodos incluyendo cambios de posición
-        const updatedNodes = nodes.map((node: FlowNode) => {
-            const change = changes.find((c: any) => c.id === node.id && c.type === 'position');
-            if (change && change.position && !change.dragging) {
-                // Solo actualizar cuando se suelta el nodo
-                // Llamar callback para actualizar posición en BD si está disponible
-                if (onNodePositionChange) {
-                    onNodePositionChange(node.id, change.position);
-                }
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    // Aplicar cambios usando la API estándar de ReactFlow
+    const updatedNodes = applyNodeChanges(changes, nodes) as FlowNode[];
 
-                // Actualizar posición del nodo y datos internos
-                return {
-                    ...node,
-                    position: change.position,
-                    data: {
-                        ...node.data,
-                        pos_x: change.position.x,
-                        pos_y: change.position.y
-                    }
-                };
-            } else if (change && change.type === 'position' && change.position) {
-                // Durante el arrastre solo actualizar visualmente
-                return { ...node, position: change.position };
+    // Manejar actualizaciones de posición para persistir en BD
+    changes.forEach((change) => {
+      if (change.type === 'position' && change.position && !change.dragging && onNodePositionChange) {
+        // Solo actualizar cuando se suelta el nodo (no está siendo arrastrado)
+        onNodePositionChange(change.id, change.position);
+
+        // Actualizar datos internos del nodo
+        const nodeIndex = updatedNodes.findIndex(n => n.id === change.id);
+        if (nodeIndex !== -1) {
+          updatedNodes[nodeIndex] = {
+            ...updatedNodes[nodeIndex],
+            data: {
+              ...updatedNodes[nodeIndex].data,
+              pos_x: change.position.x,
+              pos_y: change.position.y
             }
-
-            // Manejar otros tipos de cambios
-            const otherChange = changes.find((c: any) => c.id === node.id);
-            if (otherChange) {
-                switch (otherChange.type) {
-                    case 'select':
-                        return { ...node, selected: otherChange.selected };
-                    case 'remove':
-                        return null;
-                    default:
-                        return node;
-                }
-            }
-
-            return node;
-        }).filter(Boolean) as FlowNode[];
-
-        onNodesChange(updatedNodes);
-    }, [nodes, onNodesChange, onNodePositionChange]);
-
-  const handleEdgesChange = useCallback((changes: any) => {
-    const updatedEdges = edges.map((edge: FlowEdge) => {
-      const change = changes.find((c: any) => c.id === edge.id);
-
-      if (change) {
-        switch (change.type) {
-          case 'select':
-            return { ...edge, selected: change.selected };
-          case 'remove':
-            return null;
-          default:
-            return edge;
+          };
         }
       }
+    });
 
-      return edge;
-    }).filter(Boolean) as FlowEdge[];
+    onNodesChange(updatedNodes);
+  }, [nodes, onNodesChange, onNodePositionChange]);
 
+  const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
+    // Aplicar cambios usando la API estándar de ReactFlow
+    const updatedEdges = applyEdgeChanges(changes, edges) as FlowEdge[];
     onEdgesChange(updatedEdges);
   }, [edges, onEdgesChange]);
 
@@ -144,8 +116,8 @@ const ReactFlowEditor: React.FC<{
         zoomOnPinch={true}
         panOnScroll={false}
         zoomOnDoubleClick={true}
-                        maxZoom={1.5}
-                minZoom={0.5}
+        maxZoom={1.5}
+        minZoom={0.5}
         style={{
           background: '#fafbfc',
         }}
@@ -239,12 +211,12 @@ const VariantesCalculadora: React.FC<VariantesCalculadoraProps> = ({
 
           {/* Selector de Color */}
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ 
-              display: 'block', 
-              fontSize: '14px', 
-              fontWeight: '600', 
-              color: '#374151', 
-              marginBottom: '8px' 
+            <label style={{
+              display: 'block',
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#374151',
+              marginBottom: '8px'
             }}>
               Color:
             </label>
@@ -285,12 +257,12 @@ const VariantesCalculadora: React.FC<VariantesCalculadoraProps> = ({
 
           {/* Selector de Talla */}
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ 
-              display: 'block', 
-              fontSize: '14px', 
-              fontWeight: '600', 
-              color: '#374151', 
-              marginBottom: '8px' 
+            <label style={{
+              display: 'block',
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#374151',
+              marginBottom: '8px'
             }}>
               Talla:
             </label>
@@ -323,12 +295,12 @@ const VariantesCalculadora: React.FC<VariantesCalculadoraProps> = ({
 
           {/* Cantidad */}
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ 
-              display: 'block', 
-              fontSize: '14px', 
-              fontWeight: '600', 
-              color: '#374151', 
-              marginBottom: '8px' 
+            <label style={{
+              display: 'block',
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#374151',
+              marginBottom: '8px'
             }}>
               Cantidad de piezas:
             </label>
@@ -390,10 +362,10 @@ const VariantesCalculadora: React.FC<VariantesCalculadoraProps> = ({
           {calculoResultado && (
             <div>
               {/* Información de la variante */}
-              <div style={{ 
-                background: '#f8fafc', 
-                padding: '16px', 
-                borderRadius: '8px', 
+              <div style={{
+                background: '#f8fafc',
+                padding: '16px',
+                borderRadius: '8px',
                 marginBottom: '20px',
                 border: '1px solid #e2e8f0'
               }}>
@@ -414,9 +386,9 @@ const VariantesCalculadora: React.FC<VariantesCalculadoraProps> = ({
                   💰 Análisis de Costos
                 </h4>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                  <div style={{ 
-                    background: '#f0fdf4', 
-                    padding: '12px', 
+                  <div style={{
+                    background: '#f0fdf4',
+                    padding: '12px',
                     borderRadius: '8px',
                     border: '1px solid #bbf7d0'
                   }}>
@@ -425,9 +397,9 @@ const VariantesCalculadora: React.FC<VariantesCalculadoraProps> = ({
                       ${calculoResultado.costos?.materiales?.toFixed(2)}
                     </div>
                   </div>
-                  <div style={{ 
-                    background: '#fef3c7', 
-                    padding: '12px', 
+                  <div style={{
+                    background: '#fef3c7',
+                    padding: '12px',
                     borderRadius: '8px',
                     border: '1px solid #fde68a'
                   }}>
@@ -436,9 +408,9 @@ const VariantesCalculadora: React.FC<VariantesCalculadoraProps> = ({
                       ${calculoResultado.costos?.procesos?.toFixed(2)}
                     </div>
                   </div>
-                  <div style={{ 
-                    background: '#dbeafe', 
-                    padding: '12px', 
+                  <div style={{
+                    background: '#dbeafe',
+                    padding: '12px',
                     borderRadius: '8px',
                     border: '1px solid #93c5fd',
                     gridColumn: 'span 2'
@@ -459,9 +431,9 @@ const VariantesCalculadora: React.FC<VariantesCalculadoraProps> = ({
                 <h4 style={{ fontSize: '16px', fontWeight: '600', color: '#1e293b', marginBottom: '12px' }}>
                   ⏱️ Análisis de Tiempo
                 </h4>
-                <div style={{ 
-                  background: '#fef3c7', 
-                  padding: '16px', 
+                <div style={{
+                  background: '#fef3c7',
+                  padding: '16px',
                   borderRadius: '8px',
                   border: '1px solid #fde68a'
                 }}>
@@ -521,6 +493,15 @@ function SistemaTextilApp() {
   console.log("tallas", tallas);
 
   const calcularVarianteMutation = useCalcularVarianteTextil();
+  const calcularBOMVarianteMutation = useCalcularBOMPorVariante();
+
+  // Estados para BOM por variante
+  const [bomVarianteData, setBomVarianteData] = useState<any>(null);
+  const [bomVarianteConfig, setBomVarianteConfig] = useState({
+    color_id: null as number | null,
+    talla_id: null as number | null,
+    cantidad: 1
+  });
 
   // Cargar flujos cuando se selecciona un estilo
   useEffect(() => {
@@ -536,7 +517,7 @@ function SistemaTextilApp() {
         console.log('Cargando flujos para estilo:', selectedEstilo.id);
         const flujosData = await ApiService.getFlujosByEstilo(selectedEstilo.id);
         console.log('Flujos obtenidos:', flujosData);
-        
+
         if (Array.isArray(flujosData) && flujosData.length > 0) {
           // Buscar flujo actual o tomar el primero
           const flujoActual = flujosData.find(f => f.es_actual) || flujosData[0];
@@ -583,7 +564,7 @@ function SistemaTextilApp() {
       console.log('Cargando datos del flujo:', flujo.id);
       const flujoData = await ApiService.getFlujo(selectedEstilo.id, flujo.id);
       console.log('Datos del flujo obtenidos:', flujoData);
-      
+
       setSelectedFlujo(flujo);
 
       // Asegurar que los nodos tengan el tipo correcto y usen pos_x/pos_y de la BD
@@ -608,7 +589,7 @@ function SistemaTextilApp() {
   const cargarFlujoOptimizado = async (estiloId: number, flujo: FlujoEstilo) => {
     try {
       console.log('Cargando flujo optimizado:', flujo.id);
-      
+
       // Reutilizar los datos que ya obtuvimos en getFlujosByEstilo
       // En lugar de hacer otra llamada, usar los datos completos que ya tenemos
       const response = await fetch(`http://localhost:8002/api/v1/estilos/${estiloId}/flujos`, {
@@ -619,11 +600,11 @@ function SistemaTextilApp() {
       });
       const responseData = await response.json();
       console.log('Respuesta completa flujos:', responseData);
-      
+
       if (responseData.success && responseData.data) {
-        const flujoCompleto = responseData.data.flujo_actual || 
-                              responseData.data.flujos?.find((f: any) => f.id === flujo.id);
-        
+        const flujoCompleto = responseData.data.flujo_actual ||
+          responseData.data.flujos?.find((f: any) => f.id === flujo.id);
+
         if (flujoCompleto && flujoCompleto.nodos) {
           setSelectedFlujo(flujo);
 
@@ -694,7 +675,7 @@ function SistemaTextilApp() {
 
           console.log('Nodos ReactFlow procesados:', nodosReactFlow);
           console.log('Edges ReactFlow procesados:', edgesReactFlow);
-          
+
           setNodes(nodosReactFlow);
           setEdges(edgesReactFlow);
         }
@@ -804,6 +785,31 @@ function SistemaTextilApp() {
     setEdges([]);
   };
 
+  const calcularBOMPorVariante = async () => {
+    if (!selectedEstilo || !bomVarianteConfig.talla_id) {
+      alert('Selecciona una talla para calcular el BOM');
+      return;
+    }
+
+    try {
+      const resultado = await calcularBOMVarianteMutation.mutateAsync({
+        estiloId: selectedEstilo.id,
+        data: {
+          color_id: bomVarianteConfig.color_id || undefined,
+          talla_id: bomVarianteConfig.talla_id,
+          cantidad: bomVarianteConfig.cantidad
+        }
+      });
+
+      console.log("resultado calcularBOMPorVariante", resultado);
+
+      setBomVarianteData(resultado);
+    } catch (error) {
+      console.error('Error calculando BOM por variante:', error);
+      alert('Error al calcular el BOM por variante');
+    }
+  };
+
   const estilosFiltrados = Array.isArray(estilos) ? estilos.filter((estilo: Estilo) =>
     estilo && estilo.nombre && estilo.codigo
     // &&
@@ -883,14 +889,13 @@ function SistemaTextilApp() {
           WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent',
         }}>
-          🧵 Sistema de Gestión Textil Avanzado
         </h1>
         <p style={{
           color: '#64748b',
           fontSize: '18px',
           margin: '0'
         }}>
-          Gestión integral de estilos, procesos y materiales con ReactFlow
+          Gestión integral de estilos, procesos y materiales
         </p>
       </header>
 
@@ -955,7 +960,7 @@ function SistemaTextilApp() {
               >
                 📦 Lista de Materiales (BOM)
               </button>
-              <button
+              {/* <button
                 onClick={() => setActiveView('variantes')}
                 style={{
                   padding: '12px 20px',
@@ -970,7 +975,7 @@ function SistemaTextilApp() {
                 }}
               >
                 🎨 Cálculo de Variantes
-              </button>
+              </button> */}
             </>
           )}
         </div>
@@ -1285,7 +1290,7 @@ function SistemaTextilApp() {
           ) : bomData && bomData.bom_items && Array.isArray(bomData.bom_items) && bomData.bom_items.length > 0 ? (
             <>
               {/* Resumen */}
-              <div style={{
+              {/* <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
                 gap: '20px',
@@ -1321,11 +1326,11 @@ function SistemaTextilApp() {
                     </span>
                   </div>
                   <div style={{ fontSize: '32px', fontWeight: '800', color: '#065f46' }}>
-                    ${bomData?.resumen?.costo_total_materiales 
+                    ${bomData?.resumen?.costo_total_materiales
                       ? bomData.resumen.costo_total_materiales.toFixed(2)
                       : bomData?.bom_items?.reduce((total, item) => {
-                          return total + ((item.cantidad_base || 0) * (item.material?.costo_unitario || 0));
-                        }, 0).toFixed(2) || '0.00'
+                        return total + ((item.cantidad_base || 0) * (item.material?.costo_unitario || 0));
+                      }, 0).toFixed(2) || '0.00'
                     }
                   </div>
                 </div>
@@ -1346,10 +1351,11 @@ function SistemaTextilApp() {
                     {bomData?.resumen?.items_criticos || bomData?.bom_items?.filter(item => item.es_critico).length || 0}
                   </div>
                 </div>
-              </div>
+              </div> */}
+
 
               {/* Tabla BOM */}
-              <div style={{
+              {/* <div style={{
                 background: 'white',
                 borderRadius: '16px',
                 overflow: 'hidden',
@@ -1467,6 +1473,505 @@ function SistemaTextilApp() {
                     </tbody>
                   </table>
                 </div>
+              </div> */}
+
+
+              {/* Panel de BOM por Variante */}
+              <div style={{
+                background: 'white',
+                borderRadius: '16px',
+                border: '2px solid #e2e8f0',
+                padding: '24px',
+                marginBottom: '24px',
+                marginTop: '24px',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+              }}>
+                <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1e293b', marginBottom: '20px' }}>
+                  🎯 Cálculo de BOM por Variante Específica
+                </h3>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                  {/* Panel de configuración */}
+                  <div>
+                    <h4 style={{ fontSize: '16px', fontWeight: '600', color: '#1e293b', marginBottom: '16px' }}>
+                      Configuración de Variante
+                    </h4>
+
+                    {/* Selector de Color */}
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{
+                        display: 'block',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        color: '#374151',
+                        marginBottom: '8px'
+                      }}>
+                        Color (Opcional):
+                      </label>
+                      {loadingColores ? (
+                        <div style={{ padding: '12px', color: '#64748b' }}>Cargando colores...</div>
+                      ) : (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                          <button
+                            onClick={() => setBomVarianteConfig(prev => ({ ...prev, color_id: null }))}
+                            style={{
+                              padding: '8px 12px',
+                              border: bomVarianteConfig.color_id === null ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+                              borderRadius: '8px',
+                              background: bomVarianteConfig.color_id === null ? '#dbeafe' : 'white',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: '500'
+                            }}
+                          >
+                            Sin color específico
+                          </button>
+                          {colores.map((color) => (
+                            <button
+                              key={color.id}
+                              onClick={() => setBomVarianteConfig(prev => ({ ...prev, color_id: color.id }))}
+                              style={{
+                                padding: '8px 12px',
+                                border: bomVarianteConfig.color_id === color.id ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+                                borderRadius: '8px',
+                                background: bomVarianteConfig.color_id === color.id ? '#dbeafe' : 'white',
+                                cursor: 'pointer',
+                                fontSize: '12px',
+                                fontWeight: '500'
+                              }}
+                            >
+                              <div style={{
+                                width: '16px',
+                                height: '16px',
+                                borderRadius: '50%',
+                                background: color.codigo_hex || '#64748b',
+                                display: 'inline-block',
+                                marginRight: '8px',
+                                border: '1px solid #d1d5db'
+                              }} />
+                              {color.nombre}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Selector de Talla */}
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{
+                        display: 'block',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        color: '#374151',
+                        marginBottom: '8px'
+                      }}>
+                        Talla:
+                      </label>
+                      {loadingTallas ? (
+                        <div style={{ padding: '12px', color: '#64748b' }}>Cargando tallas...</div>
+                      ) : (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                          {tallas.map((talla) => (
+                            <button
+                              key={talla.id}
+                              onClick={() => setBomVarianteConfig(prev => ({ ...prev, talla_id: talla.id }))}
+                              style={{
+                                padding: '8px 16px',
+                                border: bomVarianteConfig.talla_id === talla.id ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+                                borderRadius: '8px',
+                                background: bomVarianteConfig.talla_id === talla.id ? '#dbeafe' : 'white',
+                                cursor: 'pointer',
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                minWidth: '50px'
+                              }}
+                            >
+                              {talla.codigo}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Cantidad */}
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{
+                        display: 'block',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        color: '#374151',
+                        marginBottom: '8px'
+                      }}>
+                        Cantidad de piezas:
+                      </label>
+                      <input
+                        type="number"
+                        value={bomVarianteConfig.cantidad}
+                        onChange={(e) => setBomVarianteConfig(prev => ({ ...prev, cantidad: Number(e.target.value) }))}
+                        min="1"
+                        style={{
+                          width: '100%',
+                          padding: '12px',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '8px',
+                          fontSize: '14px'
+                        }}
+                      />
+                    </div>
+
+                    {/* Botón de cálculo */}
+                    <button
+                      onClick={calcularBOMPorVariante}
+                      disabled={calcularBOMVarianteMutation.isPending || !bomVarianteConfig.talla_id}
+                      style={{
+                        width: '100%',
+                        padding: '12px 20px',
+                        background: !bomVarianteConfig.talla_id ? '#94a3b8' : '#10b981',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '16px',
+                        fontWeight: '600',
+                        cursor: !bomVarianteConfig.talla_id ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {calcularBOMVarianteMutation.isPending ? 'Calculando...' : '📊 Calcular BOM por Variante'}
+                    </button>
+                  </div>
+
+                  {/* Panel de resultados */}
+                  <div>
+                    <h4 style={{ fontSize: '16px', fontWeight: '600', color: '#1e293b', marginBottom: '16px' }}>
+                      Resultados del Cálculo
+                    </h4>
+
+                    {calcularBOMVarianteMutation.isPending && (
+                      <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                        <div style={{ fontSize: '48px', marginBottom: '16px' }}>⏳</div>
+                        <div>Calculando BOM para variante...</div>
+                      </div>
+                    )}
+
+                    {bomVarianteData && (
+                      <div>
+                        {/* Información de la variante */}
+                        <div style={{
+                          background: '#f8fafc',
+                          padding: '16px',
+                          borderRadius: '8px',
+                          marginBottom: '16px',
+                          border: '1px solid #e2e8f0'
+                        }}>
+                          <h5 style={{ fontSize: '14px', fontWeight: '600', color: '#1e293b', marginBottom: '8px' }}>
+                            Variante Calculada
+                          </h5>
+                          <div style={{ fontSize: '12px', color: '#64748b' }}>
+                            <div><strong>Talla:</strong> {bomVarianteData.resumen?.variante?.talla_nombre}</div>
+                            <div><strong>Multiplicador:</strong> {bomVarianteData.resumen?.variante?.multiplicador_talla}x</div>
+                            <div><strong>Cantidad:</strong> {bomVarianteData.resumen?.variante?.cantidad_piezas} piezas</div>
+                            {bomVarianteData.resumen?.variante?.color_id && (
+                              <div><strong>Color ID:</strong> {bomVarianteData.resumen?.variante?.color_id}</div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Costos */}
+                        <div style={{ marginBottom: '16px' }}>
+                          <div style={{
+                            background: '#d1fae5',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            border: '1px solid #6ee7b7'
+                          }}>
+                            <div style={{ fontSize: '12px', color: '#065f46', fontWeight: '600' }}>COSTO TOTAL</div>
+                            <div style={{ fontSize: '20px', fontWeight: '700', color: '#065f46' }}>
+                              ${bomVarianteData.resumen?.costos?.total_materiales?.toFixed(2)}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#065f46' }}>
+                              (${bomVarianteData.resumen?.costos?.costo_por_pieza?.toFixed(2)} por pieza)
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Disponibilidad */}
+                        <div style={{ marginBottom: '16px' }}>
+                          <div style={{
+                            background: bomVarianteData.resumen?.disponibilidad?.stock_suficiente ? '#d1fae5' : '#fecaca',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            border: bomVarianteData.resumen?.disponibilidad?.stock_suficiente ? '1px solid #6ee7b7' : '1px solid #f87171'
+                          }}>
+                            <div style={{
+                              fontSize: '12px',
+                              color: bomVarianteData.resumen?.disponibilidad?.stock_suficiente ? '#065f46' : '#dc2626',
+                              fontWeight: '600'
+                            }}>
+                              DISPONIBILIDAD
+                            </div>
+                            <div style={{
+                              fontSize: '14px',
+                              fontWeight: '600',
+                              color: bomVarianteData.resumen?.disponibilidad?.stock_suficiente ? '#065f46' : '#dc2626'
+                            }}>
+                              {bomVarianteData.resumen?.disponibilidad?.stock_suficiente ?
+                                '✅ Stock Suficiente' :
+                                `❌ ${bomVarianteData.resumen?.disponibilidad?.items_sin_stock} items sin stock`
+                              }
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Total de Materiales */}
+                        <div style={{ marginBottom: '16px' }}>
+                          <div style={{
+                            background: '#d1fae5',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            border: '1px solid #6ee7b7'
+                          }}>
+                            <div style={{ fontSize: '12px', color: '#065f46', fontWeight: '600' }}>TOTAL DE MATERIALES</div>
+                            <div style={{ fontSize: '20px', fontWeight: '700', color: '#065f46' }}>
+                              {bomVarianteData.bom_calculado?.length || 0}
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+                    )}
+
+                    {!bomVarianteData && !calcularBOMVarianteMutation.isPending && (
+                      <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                        <div style={{ fontSize: '48px', marginBottom: '16px' }}>📊</div>
+                        <div>Configura y calcula para ver resultados específicos</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Tabla detallada de materiales por variante */}
+                {bomVarianteData && bomVarianteData.bom_calculado && (
+                  <div style={{ marginTop: '24px' }}>
+                    <h4 style={{ fontSize: '18px', fontWeight: '700', color: '#1e293b', marginBottom: '16px' }}>
+                      📋 Lista de Materiales Específica para la Variante
+                    </h4>
+
+                    <div style={{
+                      background: 'white',
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                      border: '1px solid #e2e8f0',
+                    }}>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead style={{ background: '#f8fafc' }}>
+                            <tr>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'left',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                color: '#374151',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px',
+                                borderBottom: '1px solid #e2e8f0',
+                              }}>
+                                Material
+                              </th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'center',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                color: '#374151',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px',
+                                borderBottom: '1px solid #e2e8f0',
+                              }}>
+                                Cant. Base
+                              </th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'center',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                color: '#374151',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px',
+                                borderBottom: '1px solid #e2e8f0',
+                              }}>
+                                Cant. Final
+                              </th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'center',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                color: '#374151',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px',
+                                borderBottom: '1px solid #e2e8f0',
+                              }}>
+                                Total Req.
+                              </th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'center',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                color: '#374151',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px',
+                                borderBottom: '1px solid #e2e8f0',
+                              }}>
+                                Costo Total
+                              </th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'center',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                color: '#374151',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px',
+                                borderBottom: '1px solid #e2e8f0',
+                              }}>
+                                Stock
+                              </th>
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'center',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                color: '#374151',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px',
+                                borderBottom: '1px solid #e2e8f0',
+                              }}>
+                                Estado
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {bomVarianteData.bom_calculado.map((item: any, index: number) => (
+                              <tr
+                                key={item.material?.id || index}
+                                style={{
+                                  borderBottom: '1px solid #f1f5f9',
+                                  background: index % 2 === 0 ? 'white' : '#fafbfc',
+                                }}
+                              >
+                                <td style={{ padding: '12px 16px' }}>
+                                  <div style={{ fontWeight: '600', fontSize: '14px', color: '#1e293b', marginBottom: '2px' }}>
+                                    {item.material?.nombre || 'Material no definido'}
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#64748b' }}>
+                                    {item.material?.codigo || 'Sin código'}
+                                  </div>
+                                  <div style={{ fontSize: '11px', color: '#64748b' }}>
+                                    {item.material?.tipo || 'Sin tipo'}
+                                  </div>
+                                </td>
+                                <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '14px', color: '#1e293b' }}>
+                                  {parseFloat(item.bom_item?.cantidad_base || 0).toFixed(4)}
+                                  <div style={{ fontSize: '10px', color: '#64748b' }}>
+                                    {item.material?.unidad_medida || 'UM'}
+                                  </div>
+                                </td>
+                                <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '14px', fontWeight: '600' }}>
+                                  <span style={{ color: item.bom_item?.aplica_talla ? '#3b82f6' : '#64748b' }}>
+                                    {typeof item.bom_item?.cantidad_final === 'number'
+                                      ? item.bom_item.cantidad_final.toFixed(4)
+                                      : parseFloat(item.bom_item?.cantidad_final || 0).toFixed(4)
+                                    }
+                                  </span>
+                                  <div style={{ fontSize: '10px', color: '#64748b' }}>
+                                    {item.material?.unidad_medida || 'UM'}
+                                  </div>
+                                  {item.bom_item?.aplica_talla && (
+                                    <div style={{ fontSize: '10px', color: '#3b82f6' }}>
+                                      (×{item.bom_item?.multiplicador_aplicado})
+                                    </div>
+                                  )}
+                                </td>
+                                <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '14px', fontWeight: '700', color: '#059669' }}>
+                                  {typeof item.calculo_produccion?.cantidad_total_requerida === 'number'
+                                    ? item.calculo_produccion.cantidad_total_requerida.toFixed(4)
+                                    : parseFloat(item.calculo_produccion?.cantidad_total_requerida || 0).toFixed(4)
+                                  }
+                                  <div style={{ fontSize: '10px', color: '#64748b' }}>
+                                    {item.material?.unidad_medida || 'UM'}
+                                  </div>
+                                </td>
+                                <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '15px', fontWeight: '700', color: '#059669' }}>
+                                  ${typeof item.calculo_produccion?.costo_total_requerido === 'number'
+                                    ? item.calculo_produccion.costo_total_requerido.toFixed(4)
+                                    : parseFloat(item.calculo_produccion?.costo_total_requerido || 0).toFixed(4)
+                                  }
+                                </td>
+                                <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                                  <span style={{
+                                    color: item.calculo_produccion?.stock_suficiente ? '#059669' : '#dc2626',
+                                    fontWeight: '600',
+                                    fontSize: '12px'
+                                  }}>
+                                    {item.calculo_produccion?.stock_suficiente ? '✅ Suficiente' : '❌ Insuficiente'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
+                                    {item.bom_item?.es_critico && (
+                                      <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        padding: '2px 6px',
+                                        fontSize: '10px',
+                                        fontWeight: 'bold',
+                                        borderRadius: '12px',
+                                        background: '#fecaca',
+                                        color: '#dc2626',
+                                      }}>
+                                        🔴 Crítico
+                                      </span>
+                                    )}
+                                    {item.bom_item?.aplica_color && (
+                                      <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        padding: '2px 6px',
+                                        fontSize: '10px',
+                                        fontWeight: 'bold',
+                                        borderRadius: '12px',
+                                        background: '#dbeafe',
+                                        color: '#1e40af',
+                                      }}>
+                                        🎨 Por color
+                                      </span>
+                                    )}
+                                    {item.bom_item?.aplica_talla && (
+                                      <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        padding: '2px 6px',
+                                        fontSize: '10px',
+                                        fontWeight: 'bold',
+                                        borderRadius: '12px',
+                                        background: '#fef3c7',
+                                        color: '#92400e',
+                                      }}>
+                                        📏 Por talla
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           ) : (
@@ -1495,8 +2000,8 @@ function SistemaTextilApp() {
       )}
 
       {/* Content - Cálculo de Variantes */}
-      {activeView === 'variantes' && selectedEstilo && (
-        <VariantesCalculadora 
+      {/* {activeView === 'variantes' && selectedEstilo && (
+        <VariantesCalculadora
           estilo={selectedEstilo}
           colores={colores}
           tallas={tallas}
@@ -1504,7 +2009,7 @@ function SistemaTextilApp() {
           loadingTallas={loadingTallas}
           calcularVarianteMutation={calcularVarianteMutation}
         />
-      )}
+      )} */}
     </div>
   );
 }

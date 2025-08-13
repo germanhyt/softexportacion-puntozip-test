@@ -440,6 +440,19 @@ export const useCalcularVarianteTextil = () => {
     });
 };
 
+export const useCalcularBOMPorVariante = () => {
+    return useMutation({
+        mutationFn: ({ estiloId, data }: {
+            estiloId: number;
+            data: {
+                color_id?: number;
+                talla_id: number;
+                cantidad: number;
+            }
+        }) => ApiService.calcularBOMPorVariante(estiloId, data),
+    });
+};
+
 export const useHistorialVariante = (estiloId: number, colorId: number, tallaId: number) => {
     return useQuery({
         queryKey: queryKeys.historialVariante(estiloId, colorId, tallaId),

@@ -46,16 +46,20 @@ const CustomNode: React.FC<CustomNodeProps> = ({ data, selected }) => {
                     position: 'relative',
                 }}
             >
-                <Handle
-                    type="target"
-                    position={Position.Left}
-                    style={{
-                        background: bgColor,
-                        border: '2px solid white',
-                        width: '16px',
-                        height: '16px',
-                    }}
-                />
+                {/* Handle de entrada - opcional para procesos intermedios, obligatorio para finales */}
+                {!data.es_punto_inicio && (
+                    <Handle
+                        type="target"
+                        position={Position.Left}
+                        style={{
+                            background: bgColor,
+                            border: '2px solid white',
+                            width: '16px',
+                            height: '16px',
+                            opacity: data.es_punto_final ? 1 : 0.7, // Más prominente para procesos finales
+                        }}
+                    />
+                )}
 
                 {/* Indicadores de estado */}
                 <div style={{
@@ -279,16 +283,20 @@ const CustomNode: React.FC<CustomNodeProps> = ({ data, selected }) => {
                     </div>
                 </div>
 
-                <Handle
-                    type="source"
-                    position={Position.Right}
-                    style={{
-                        background: bgColor,
-                        border: '2px solid white',
-                        width: '16px',
-                        height: '16px',
-                    }}
-                />
+                {/* Handle de salida - obligatorio para todos excepto procesos finales */}
+                {!data.es_punto_final && (
+                    <Handle
+                        type="source"
+                        position={Position.Right}
+                        style={{
+                            background: bgColor,
+                            border: '2px solid white',
+                            width: '16px',
+                            height: '16px',
+                            opacity: 1, // Siempre prominente para indicar salida obligatoria
+                        }}
+                    />
+                )}
             </div>
 
             {/* Modal de detalle SOP */}
