@@ -1,7 +1,6 @@
 -- =============================================
--- MODELO DE DATOS SISTEMA TEXTIL ESTILOS v3
+-- MODELO DE DATOS SISTEMA TEXTIL ESTILOS v2
 -- Base de datos para gestión de procesos textiles
--- Adaptado según lógica de EstilosZip.html
 -- Optimizado para @xyflow/react con flujos separados
 -- =============================================
 
@@ -13,7 +12,7 @@ USE textil_estilos;
 -- TABLAS MAESTRAS
 -- =============================================
 
--- Tabla de categorías de materiales (específicas para textil)
+-- Tabla de categorías de materiales
 CREATE TABLE categorias_materiales (
     id INT PRIMARY KEY AUTO_INCREMENT,
     nombre VARCHAR(100) NOT NULL,
@@ -23,7 +22,7 @@ CREATE TABLE categorias_materiales (
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Tabla de unidades de medida (específicas para textil)
+-- Tabla de unidades de medida
 CREATE TABLE unidades_medida (
     id INT PRIMARY KEY AUTO_INCREMENT,
     codigo VARCHAR(10) NOT NULL UNIQUE,
@@ -33,7 +32,7 @@ CREATE TABLE unidades_medida (
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tabla de colores (específica para tintes textiles)
+-- Tabla de colores
 CREATE TABLE colores (
     id INT PRIMARY KEY AUTO_INCREMENT,
     nombre VARCHAR(100) NOT NULL,
@@ -43,7 +42,7 @@ CREATE TABLE colores (
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tabla de tallas con multiplicadores específicos para textil
+-- Tabla de tallas
 CREATE TABLE tallas (
     id INT PRIMARY KEY AUTO_INCREMENT,
     codigo VARCHAR(10) NOT NULL UNIQUE,
@@ -55,10 +54,10 @@ CREATE TABLE tallas (
 );
 
 -- =============================================
--- MATERIALES TEXTILES ESPECIALIZADOS
+-- MATERIALES Y RECURSOS
 -- =============================================
 
--- Tabla de materiales (adaptada para textil según EstilosZip.html)
+-- Tabla de materiales (solo campos esenciales)
 CREATE TABLE materiales (
     id INT PRIMARY KEY AUTO_INCREMENT,
     codigo VARCHAR(50) NOT NULL UNIQUE,
@@ -68,8 +67,6 @@ CREATE TABLE materiales (
     costo_unitario DECIMAL(10,4) NOT NULL,
     stock_actual DECIMAL(12,4) DEFAULT 0,
     proveedor VARCHAR(200),
-    tipo_material ENUM('hilo', 'tinte', 'quimico', 'tinta', 'avio', 'empaque') NOT NULL,
-    es_critico BOOLEAN DEFAULT FALSE,
     estado ENUM('activo', 'inactivo') DEFAULT 'activo',
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -77,11 +74,10 @@ CREATE TABLE materiales (
     FOREIGN KEY (id_categoria) REFERENCES categorias_materiales(id),
     FOREIGN KEY (id_unidad_medida) REFERENCES unidades_medida(id),
     INDEX idx_material_codigo (codigo),
-    INDEX idx_material_categoria (id_categoria),
-    INDEX idx_material_tipo (tipo_material)
+    INDEX idx_material_categoria (id_categoria)
 );
 
--- Tabla de relación material-color (para tintes específicos)
+-- Tabla de relación material-color (solo para tintes)
 CREATE TABLE materiales_colores (
     id INT PRIMARY KEY AUTO_INCREMENT,
     id_material INT NOT NULL,
@@ -96,10 +92,10 @@ CREATE TABLE materiales_colores (
 );
 
 -- =============================================
--- ESTILOS Y PRODUCTOS TEXTILES
+-- ESTILOS Y PRODUCTOS
 -- =============================================
 
--- Tabla de estilos (productos base textiles)
+-- Tabla de estilos (productos base)
 CREATE TABLE estilos (
     id INT PRIMARY KEY AUTO_INCREMENT,
     codigo VARCHAR(50) NOT NULL UNIQUE,
@@ -109,14 +105,12 @@ CREATE TABLE estilos (
     año_produccion YEAR,
     costo_objetivo DECIMAL(10,4),
     tiempo_objetivo_min DECIMAL(10,2),
-    tipo_producto ENUM('polo', 'camisa', 'pantalon', 'vestido', 'otro') DEFAULT 'otro',
     estado ENUM('desarrollo', 'activo', 'descontinuado') DEFAULT 'desarrollo',
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
     INDEX idx_estilo_codigo (codigo),
-    INDEX idx_estilo_estado (estado),
-    INDEX idx_estilo_tipo (tipo_producto)
+    INDEX idx_estilo_estado (estado)
 );
 
 -- Tabla de variantes de estilos (combinaciones color-talla)
@@ -140,10 +134,10 @@ CREATE TABLE variantes_estilos (
 );
 
 -- =============================================
--- PROCESOS TEXTILES ESPECIALIZADOS
+-- PROCESOS PRODUCTIVOS
 -- =============================================
 
--- Tabla de tipos de procesos (específicos para textil)
+-- Tabla de tipos de procesos
 CREATE TABLE tipos_procesos (
     id INT PRIMARY KEY AUTO_INCREMENT,
     nombre VARCHAR(100) NOT NULL,
@@ -154,7 +148,7 @@ CREATE TABLE tipos_procesos (
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tabla de procesos (plantillas reutilizables para textil)
+-- Tabla de procesos (plantillas reutilizables)
 CREATE TABLE procesos (
     id INT PRIMARY KEY AUTO_INCREMENT,
     codigo VARCHAR(50) NOT NULL UNIQUE,
@@ -166,8 +160,6 @@ CREATE TABLE procesos (
     tiempo_base_min DECIMAL(10,2) NOT NULL,
     merma_porcentaje DECIMAL(5,2) DEFAULT 0,
     es_paralelo BOOLEAN DEFAULT FALSE,
-    es_opcional BOOLEAN DEFAULT FALSE,
-    requiere_color BOOLEAN DEFAULT FALSE, -- Para procesos como teñido/estampado
     estado ENUM('activo', 'inactivo') DEFAULT 'activo',
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -178,7 +170,7 @@ CREATE TABLE procesos (
 );
 
 -- =============================================
--- FLUJOS DE ESTILOS TEXTILES (SEPARADO)
+-- FLUJOS DE ESTILOS (SEPARADO)
 -- =============================================
 
 -- Tabla principal de flujos por estilo
@@ -211,6 +203,7 @@ CREATE TABLE flujos_nodos_procesos (
     alto DECIMAL(8,2) DEFAULT 80,
     costo_personalizado DECIMAL(10,4), -- Override del costo base
     tiempo_personalizado_min DECIMAL(10,2), -- Override del tiempo base
+    es_opcional BOOLEAN DEFAULT FALSE,
     es_punto_inicio BOOLEAN DEFAULT FALSE,
     es_punto_final BOOLEAN DEFAULT FALSE,
     notas TEXT,
@@ -249,18 +242,16 @@ CREATE TABLE flujos_conexiones (
 );
 
 -- =============================================
--- BILL OF MATERIALS (BOM) - TEXTIL ESPECIALIZADO
+-- BILL OF MATERIALS (BOM) - SIMPLIFICADO
 -- =============================================
 
--- Tabla de BOM por estilo (adaptada para textil)
+-- Tabla de BOM por estilo (solo datos esenciales)
 CREATE TABLE bom_estilos (
     id INT PRIMARY KEY AUTO_INCREMENT,
     id_estilo INT NOT NULL,
     id_material INT NOT NULL,
     cantidad_base DECIMAL(12,6) NOT NULL, -- Cantidad para talla M
     id_proceso INT, -- Proceso donde se consume (opcional)
-    aplica_talla BOOLEAN DEFAULT TRUE, -- Si se ajusta por multiplicador de talla
-    aplica_color BOOLEAN DEFAULT FALSE, -- Si es específico por color (tintes)
     es_critico BOOLEAN DEFAULT FALSE,
     estado ENUM('activo', 'inactivo') DEFAULT 'activo',
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -273,10 +264,10 @@ CREATE TABLE bom_estilos (
 );
 
 -- =============================================
--- INPUTS Y OUTPUTS TEXTILES
+-- INPUTS Y OUTPUTS SIMPLIFICADOS
 -- =============================================
 
--- Tabla de inputs por proceso (específicos para textil)
+-- Tabla de inputs por proceso (solo esenciales)
 CREATE TABLE procesos_inputs (
     id INT PRIMARY KEY AUTO_INCREMENT,
     id_proceso INT NOT NULL,
@@ -293,7 +284,7 @@ CREATE TABLE procesos_inputs (
     INDEX idx_input_proceso (id_proceso)
 );
 
--- Tabla de outputs por proceso (específicos para textil)
+-- Tabla de outputs por proceso (solo esenciales)
 CREATE TABLE procesos_outputs (
     id INT PRIMARY KEY AUTO_INCREMENT,
     id_proceso INT NOT NULL,
@@ -307,10 +298,10 @@ CREATE TABLE procesos_outputs (
 );
 
 -- =============================================
--- CÁLCULOS Y RESULTADOS - OPTIMIZADO PARA TEXTIL
+-- CÁLCULOS Y RESULTADOS - OPTIMIZADO
 -- =============================================
 
--- Tabla de cálculos por variante (datos finales)
+-- Tabla de cálculos por variante (solo datos finales)
 CREATE TABLE calculos_variantes (
     id INT PRIMARY KEY AUTO_INCREMENT,
     id_variante_estilo INT NOT NULL,
@@ -342,7 +333,7 @@ CREATE INDEX idx_flujos_actuales ON flujos_estilos(id_estilo, es_actual);
 CREATE INDEX idx_nodos_posiciones ON flujos_nodos_procesos(id_flujo_estilo, pos_x, pos_y);
 
 -- =============================================
--- VISTAS OPTIMIZADAS PARA TEXTIL
+-- VISTAS OPTIMIZADAS
 -- =============================================
 
 -- Vista de resumen de estilos
@@ -351,7 +342,6 @@ SELECT
     e.id,
     e.codigo,
     e.nombre,
-    e.tipo_producto,
     e.estado,
     COUNT(DISTINCT ve.id) as total_variantes,
     COUNT(DISTINCT ve.id_color) as total_colores,
@@ -361,9 +351,9 @@ SELECT
 FROM estilos e
 LEFT JOIN variantes_estilos ve ON e.id = ve.id_estilo AND ve.estado = 'activo'
 WHERE e.estado IN ('desarrollo', 'activo')
-GROUP BY e.id, e.codigo, e.nombre, e.tipo_producto, e.estado;
+GROUP BY e.id, e.codigo, e.nombre, e.estado;
 
--- Vista de BOM completo por variante (optimizada para textil)
+-- Vista de BOM completo por variante (optimizada)
 CREATE VIEW v_bom_variantes AS
 SELECT 
     ve.id as variante_id,
@@ -374,21 +364,11 @@ SELECT
     t.codigo as talla,
     m.codigo as codigo_material,
     m.nombre as nombre_material,
-    m.tipo_material,
     cm.nombre as categoria_material,
     um.codigo as unidad_medida,
-    be.cantidad_base,
-    CASE 
-        WHEN be.aplica_talla THEN (be.cantidad_base * t.multiplicador_cantidad)
-        ELSE be.cantidad_base
-    END as cantidad_final,
+    (be.cantidad_base * t.multiplicador_cantidad) as cantidad_final,
     m.costo_unitario,
-    CASE 
-        WHEN be.aplica_talla THEN (be.cantidad_base * t.multiplicador_cantidad * m.costo_unitario)
-        ELSE (be.cantidad_base * m.costo_unitario)
-    END as costo_total_material,
-    be.aplica_color,
-    be.es_critico
+    (be.cantidad_base * t.multiplicador_cantidad * m.costo_unitario) as costo_total_material
 FROM variantes_estilos ve
 JOIN estilos e ON ve.id_estilo = e.id
 JOIN colores c ON ve.id_color = c.id
@@ -422,8 +402,7 @@ SELECT
     COALESCE(fnp.tiempo_personalizado_min, p.tiempo_base_min) as tiempo_proceso,
     p.merma_porcentaje,
     p.es_paralelo,
-    p.es_opcional,
-    p.requiere_color,
+    fnp.es_opcional,
     fnp.es_punto_inicio,
     fnp.es_punto_final,
     fnp.estado
@@ -468,8 +447,6 @@ SELECT
     fnp.es_punto_inicio,
     fnp.es_punto_final,
     p.es_paralelo,
-    p.es_opcional,
-    p.requiere_color,
     COALESCE(fnp.costo_personalizado, p.costo_base) as costo,
     COALESCE(fnp.tiempo_personalizado_min, p.tiempo_base_min) as tiempo,
     -- Siguiente proceso en la secuencia
@@ -508,13 +485,13 @@ USE textil_estilos;
 -- DATOS MAESTROS
 -- =============================================
 
--- Insertar categorías de materiales (específicas para textil según EstilosZip.html)
+-- Insertar categorías de materiales
 INSERT INTO categorias_materiales (nombre, descripcion) VALUES
-('Hilos', 'Hilos de algodón y fibras para tejido'),
-('Tintes', 'Tintes reactivos para teñido'),
-('Químicos', 'Productos químicos para acabados'),
-('Tintas', 'Tintas para estampado textil'),
-('Avíos', 'Accesorios y complementos de confección'),
+('Hilos', 'Hilos para tejido y confección'),
+('Tintes', 'Tintes reactivos y pigmentos'),
+('Químicos', 'Productos químicos para procesos'),
+('Tintas', 'Tintas de estampado'),
+('Avíos', 'Accesorios y complementos'),
 ('Empaques', 'Materiales de empaque y etiquetado');
 
 -- Insertar unidades de medida
@@ -544,45 +521,44 @@ INSERT INTO tallas (codigo, nombre, multiplicador_cantidad, orden) VALUES
 -- MATERIALES OPTIMIZADOS
 -- =============================================
 
--- Insertar materiales según EstilosZip.html
-INSERT INTO materiales (codigo, nombre, id_categoria, id_unidad_medida, costo_unitario, stock_actual, proveedor, tipo_material, es_critico) VALUES
--- Hilos (categoria 1) - Críticos
-('MAT-001J', 'Hilo Algodón Pima 24/1 (Para Jersey)', 1, 1, 8.5000, 1200.500, 'Textiles del Valle S.A.', 'hilo', TRUE),
-('MAT-001R', 'Hilo Algodón Pima 24/1 (Para Rib)', 1, 1, 8.5000, 150.000, 'Textiles del Valle S.A.', 'hilo', TRUE),
--- Tintes (categoria 2) - Específicos por color
-('MAT-002', 'Tinte Azul Marino Reactivo', 2, 1, 15.0000, 50.750, 'Colorantes Andinos', 'tinte', FALSE),
-('MAT-003', 'Tinte Rojo Reactivo', 2, 1, 16.5000, 35.200, 'Colorantes Andinos', 'tinte', FALSE),
+-- Insertar materiales con nueva nomenclatura: id_categoria, id_unidad_medida
+INSERT INTO materiales (codigo, nombre, id_categoria, id_unidad_medida, costo_unitario, stock_actual, proveedor) VALUES
+-- Hilos (categoria 1)
+('MAT-001', 'Algodón 100% 20/1', 1, 1, 8.5000, 1200.500, 'Textiles del Valle S.A.'),
+('MAT-002', 'Hilo Elastano 40D', 1, 1, 25.7500, 150.000, 'Fibras Técnicas Ltda'),
+-- Tintes (categoria 2) 
+('MAT-003', 'Tinte Reactivo Azul Marino', 2, 1, 45.2000, 50.750, 'Colorantes Andinos'),
+('MAT-004', 'Tinte Reactivo Rojo', 2, 1, 42.8000, 35.200, 'Colorantes Andinos'),
+('MAT-005', 'Tinte Reactivo Blanco', 2, 1, 38.5000, 80.300, 'Colorantes Andinos'),
 -- Químicos (categoria 3)
-('MAT-004', 'Suavizante Siliconado', 3, 1, 5.0000, 200.000, 'Químicos Industriales', 'quimico', FALSE),
-('MAT-005', 'Aceite de Tejeduría', 3, 2, 4.0000, 120.500, 'Químicos Industriales', 'quimico', FALSE),
+('MAT-006', 'Suavizante Textil', 3, 2, 12.3000, 200.000, 'Químicos Industriales'),
+('MAT-007', 'Detergente Industrial', 3, 1, 18.9000, 120.500, 'Químicos Industriales'),
 -- Tintas (categoria 4)
-('MAT-006', 'Tinta de Estampado (Base Agua)', 4, 1, 20.0000, 25.800, 'Tintas y Más', 'tinta', FALSE),
+('MAT-008', 'Tinta Plastisol Blanca', 4, 1, 32.7500, 25.800, 'Tintas y Más'),
 -- Avíos (categoria 5)
-('AVIO-001', 'Hilo de Costura (Color)', 5, 3, 2.5000, 10000.000, 'Avíos Textiles', 'avio', FALSE),
-('AVIO-002', 'Etiqueta de Talla', 5, 3, 0.0500, 8000.000, 'Etiquetas Premium', 'avio', FALSE),
-('AVIO-003', 'Etiqueta de Marca', 5, 3, 0.1000, 5000.000, 'Etiquetas Premium', 'avio', FALSE),
-('AVIO-004', 'Hang Tag de Cartón', 5, 3, 0.1200, 3000.000, 'Empaques del Norte', 'avio', FALSE),
+('MAT-009', 'Etiqueta Talla', 5, 3, 0.0850, 10000.000, 'Etiquetas Premium'),
+('MAT-010', 'Etiqueta Composición', 5, 3, 0.0650, 8000.000, 'Etiquetas Premium'),
 -- Empaques (categoria 6)
-('PACK-001', 'Bolsa de Polipropileno', 6, 3, 0.0800, 5000.000, 'Empaques del Norte', 'empaque', FALSE);
+('MAT-011', 'Bolsa Polipropileno', 6, 3, 0.1200, 5000.000, 'Empaques del Norte');
 
 -- =============================================
 -- RELACIONES MATERIAL-COLOR (SOLO PARA TINTES)
 -- =============================================
 
--- Insertar relaciones material-color (tintes específicos por color)
+-- Insertar relaciones material-color con nueva nomenclatura: id_material, id_color
 INSERT INTO materiales_colores (id_material, id_color) VALUES
 -- Tintes con sus colores correspondientes
 (3, 1), -- Tinte Azul Marino con Azul Marino
-(4, 2), -- Tinte Rojo con Rojo
-(5, 3); -- Tinte Blanco con Blanco (si existe)
+(4, 2), -- Tinte Rojo con Rojo  
+(5, 3); -- Tinte Blanco con Blanco
 
 -- =============================================
 -- ESTILOS Y VARIANTES
 -- =============================================
 
 -- Insertar estilo principal
-INSERT INTO estilos (codigo, nombre, descripcion, temporada, año_produccion, costo_objetivo, tiempo_objetivo_min, tipo_producto) VALUES
-('P-2025-02', 'Polo Andes Premium', 'Polo premium 100% algodón con diseño exclusivo de los Andes', 'Verano 2025', 2025, 35.5000, 180.00, 'polo');
+INSERT INTO estilos (codigo, nombre, descripcion, temporada, año_produccion, costo_objetivo, tiempo_objetivo_min) VALUES
+('P-2025-02', 'Polo Andes Premium', 'Polo premium 100% algodón con diseño exclusivo de los Andes', 'Verano 2025', 2025, 35.5000, 180.00);
 
 -- Insertar variantes del estilo con nueva nomenclatura: id_estilo, id_color, id_talla
 INSERT INTO variantes_estilos (id_estilo, id_color, id_talla, codigo_sku) 
@@ -602,33 +578,23 @@ WHERE e.codigo = 'P-2025-02'
 -- TIPOS Y PROCESOS
 -- =============================================
 
--- Insertar tipos de procesos (específicos para textil según EstilosZip.html)
+-- Insertar tipos de procesos
 INSERT INTO tipos_procesos (nombre, descripcion, color_hex, icono) VALUES
 ('Tejeduría', 'Procesos de tejido y formación de tela', '#3B82F6', 'fabric'),
-('Tintorería', 'Procesos de teñido y acabado', '#EF4444', 'palette'),
-('Lavado', 'Procesos de lavado y estabilización', '#06B6D4', 'droplets'),
-('Corte', 'Procesos de corte de piezas', '#10B981', 'scissors'),
-('Estampado', 'Procesos de estampado textil', '#8B5CF6', 'brush'),
-('Confección', 'Procesos de costura y ensamblaje', '#F59E0B', 'needle'),
-('Acabado', 'Procesos finales y empaque', '#6B7280', 'package');
+('Tintorería', 'Procesos de teñido y coloración', '#EF4444', 'palette'),
+('Confección', 'Procesos de corte y costura', '#10B981', 'scissors'),
+('Acabados', 'Procesos finales y control de calidad', '#F59E0B', 'check-circle'),
+('Empaque', 'Procesos de empaque y etiquetado', '#8B5CF6', 'package');
 
--- Insertar procesos según EstilosZip.html
-INSERT INTO procesos (codigo, nombre, descripcion, sop, id_tipo_proceso, costo_base, tiempo_base_min, merma_porcentaje, es_paralelo, es_opcional, requiere_color) VALUES
--- Tejeduría
-('PROC-01A', 'Tejido Jersey', 'Alimentar hilos de algodón en tejedora circular (Galga 28). Verificar tensión y gramaje objetivo (180 g/m²).', 'SOP-01A: Configurar tensión hilos, velocidad 180rpm, galga 28', 1, 0.7500, 2.50, 2.0, FALSE, FALSE, FALSE),
-('PROC-01B', 'Tejido Rib', 'Alimentar hilo de algodón en tejedora circular para Rib 1x1 (Galga 18). Asegurar elasticidad y recuperación correctas.', 'SOP-01B: Configurar tensión hilos, galga 18, verificar elasticidad', 1, 0.1500, 0.50, 2.0, FALSE, FALSE, FALSE),
--- Tintorería
-('PROC-02', 'Teñido y Acabado', 'Cargar telas en tina de teñido. Aplicar ciclo reactivo según receta. Controlar pH, temperatura y tiempo.', 'SOP-02: Temperatura 60°C, pH 11-12, tiempo 120min', 2, 1.2000, 5.00, 3.0, FALSE, FALSE, TRUE),
--- Lavado
-('PROC-03', 'Lavado de Paños', 'Procesar tela Jersey en lavadora industrial con suavizante para mejorar tacto y estabilizar encogimiento. Secar a temperatura controlada.', 'SOP-03: Lavado con suavizante, secado controlado', 3, 0.3000, 3.00, 1.0, FALSE, TRUE, FALSE),
--- Corte
-('PROC-04', 'Corte', 'Reposar telas 24h. Tender sobre mesa de corte y posicionar moldes (tizada). Cortar piezas con máquina vertical.', 'SOP-04: Marcar moldes, configurar cuchilla, verificar medidas', 4, 0.5500, 2.00, 15.0, FALSE, FALSE, FALSE),
--- Estampado
-('PROC-05', 'Estampado en Pieza', 'Posicionar piezas en pulpo de serigrafía. Aplicar tinta con raqueta (presión uniforme). Pre-secar y curar en horno a 160°C por 3 min.', 'SOP-05: Serigrafía, presión uniforme, curación 160°C', 5, 0.6000, 1.50, 5.0, FALSE, TRUE, FALSE),
--- Confección
-('PROC-06', 'Confección', 'Ensamblar piezas en línea de producción: remalle, recubierto, pegado de cuello y etiquetas. Usar guías y especificaciones de costura.', 'SOP-06: Puntada overlock 3 hilos, velocidad 3000ppm', 6, 2.6000, 15.00, 0.5, FALSE, FALSE, FALSE),
--- Acabado
-('PROC-07', 'Acabado y Empaque', 'Inspección final, limpieza de hilos, vaporizado, doblado y embolsado. Colocar hang tag.', 'SOP-07: Inspección, limpieza, doblado, embolsado', 7, 0.4000, 3.00, 0.0, FALSE, FALSE, FALSE);
+-- Insertar procesos con nueva nomenclatura: id_tipo_proceso
+INSERT INTO procesos (codigo, nombre, descripcion, sop, id_tipo_proceso, costo_base, tiempo_base_min, merma_porcentaje, es_paralelo) VALUES
+('PROC-001', 'Tejido Circular', 'Tejido en máquina circular para crear la tela base', 'SOP-001: Configurar tensión hilos, velocidad 180rpm', 1, 8.5000, 45.00, 2.5, FALSE),
+('PROC-002', 'Teñido Reactivo', 'Proceso de teñido con colorantes reactivos', 'SOP-002: Temperatura 60°C, pH 11-12, tiempo 120min', 2, 12.3000, 120.00, 3.0, FALSE),
+('PROC-003', 'Corte Automático', 'Corte de piezas con máquina automática', 'SOP-003: Marcar moldes, configurar cuchilla, verificar medidas', 3, 3.2000, 15.00, 1.0, FALSE),
+('PROC-004', 'Costura Principal', 'Costura de hombros, costados y mangas', 'SOP-004: Puntada overlock 3 hilos, velocidad 3000ppm', 3, 6.8000, 35.00, 0.5, FALSE),
+('PROC-005', 'Acabado Cuello', 'Ribeteado y costura del cuello', 'SOP-005: Sesgo 2.5cm, puntada recta doble', 3, 4.2000, 20.00, 1.5, TRUE),
+('PROC-006', 'Control de Calidad', 'Inspección visual y de medidas', 'SOP-006: Check list 15 puntos, muestreo 10%', 4, 2.1000, 12.00, 0.0, FALSE),
+('PROC-007', 'Empaque Final', 'Doblado, etiquetado y empaque', 'SOP-007: Doblar según estándar, etiquetar, embolar', 5, 1.8000, 8.00, 0.0, FALSE);
 
 -- =============================================
 -- FLUJO DE PROCESO PARA EL ESTILO
@@ -645,53 +611,50 @@ SELECT
 FROM estilos e 
 WHERE e.codigo = 'P-2025-02';
 
--- Insertar nodos del flujo según EstilosZip.html
+-- Insertar nodos del flujo con nueva nomenclatura: id_flujo_estilo, id_proceso
 INSERT INTO flujos_nodos_procesos (id_flujo_estilo, id_proceso, orden_secuencia, pos_x, pos_y, ancho, alto, es_punto_inicio, es_punto_final) 
 SELECT 
     fe.id as id_flujo_estilo,
     p.id as id_proceso,
     CASE p.codigo
-        WHEN 'PROC-01A' THEN 1
-        WHEN 'PROC-01B' THEN 1  -- Paralelo con PROC-01A
-        WHEN 'PROC-02' THEN 2
-        WHEN 'PROC-03' THEN 3
-        WHEN 'PROC-04' THEN 4
-        WHEN 'PROC-05' THEN 5
-        WHEN 'PROC-06' THEN 6
-        WHEN 'PROC-07' THEN 7
+        WHEN 'PROC-001' THEN 1
+        WHEN 'PROC-002' THEN 2  
+        WHEN 'PROC-003' THEN 3
+        WHEN 'PROC-004' THEN 4
+        WHEN 'PROC-005' THEN 5
+        WHEN 'PROC-006' THEN 6
+        WHEN 'PROC-007' THEN 7
     END as orden_secuencia,
     CASE p.codigo
-        WHEN 'PROC-01A' THEN 100.00
-        WHEN 'PROC-01B' THEN 300.00  -- Paralelo al lado
-        WHEN 'PROC-02' THEN 500.00
-        WHEN 'PROC-03' THEN 700.00
-        WHEN 'PROC-04' THEN 900.00
-        WHEN 'PROC-05' THEN 1100.00
-        WHEN 'PROC-06' THEN 1300.00
-        WHEN 'PROC-07' THEN 1500.00
+        WHEN 'PROC-001' THEN 100.00
+        WHEN 'PROC-002' THEN 350.00
+        WHEN 'PROC-003' THEN 600.00
+        WHEN 'PROC-004' THEN 850.00
+        WHEN 'PROC-005' THEN 850.00  -- Paralelo con PROC-004
+        WHEN 'PROC-006' THEN 1100.00
+        WHEN 'PROC-007' THEN 1350.00
     END as pos_x,
     CASE p.codigo
-        WHEN 'PROC-01A' THEN 100.00
-        WHEN 'PROC-01B' THEN 100.00  -- Misma altura
-        WHEN 'PROC-02' THEN 100.00
-        WHEN 'PROC-03' THEN 100.00
-        WHEN 'PROC-04' THEN 100.00
-        WHEN 'PROC-05' THEN 100.00
-        WHEN 'PROC-06' THEN 100.00
-        WHEN 'PROC-07' THEN 100.00
+        WHEN 'PROC-001' THEN 100.00
+        WHEN 'PROC-002' THEN 100.00
+        WHEN 'PROC-003' THEN 100.00
+        WHEN 'PROC-004' THEN 50.00
+        WHEN 'PROC-005' THEN 150.00   -- Paralelo debajo
+        WHEN 'PROC-006' THEN 100.00
+        WHEN 'PROC-007' THEN 100.00
     END as pos_y,
     200.00 as ancho,
     80.00 as alto,
-    CASE WHEN p.codigo IN ('PROC-01A', 'PROC-01B') THEN TRUE ELSE FALSE END as es_punto_inicio,
-    CASE WHEN p.codigo = 'PROC-07' THEN TRUE ELSE FALSE END as es_punto_final
+    CASE WHEN p.codigo = 'PROC-001' THEN TRUE ELSE FALSE END as es_punto_inicio,
+    CASE WHEN p.codigo = 'PROC-007' THEN TRUE ELSE FALSE END as es_punto_final
 FROM flujos_estilos fe
 JOIN estilos e ON fe.id_estilo = e.id
 CROSS JOIN procesos p
 WHERE e.codigo = 'P-2025-02' 
   AND fe.es_actual = TRUE
-  AND p.codigo IN ('PROC-01A', 'PROC-01B', 'PROC-02', 'PROC-03', 'PROC-04', 'PROC-05', 'PROC-06', 'PROC-07');
+  AND p.codigo IN ('PROC-001', 'PROC-002', 'PROC-003', 'PROC-004', 'PROC-005', 'PROC-006', 'PROC-007');
 
--- Crear conexiones entre nodos según EstilosZip.html
+-- Crear conexiones entre nodos con nueva nomenclatura: id_flujo_estilo, id_nodo_origen, id_nodo_destino
 INSERT INTO flujos_conexiones (id_flujo_estilo, id_nodo_origen, id_nodo_destino, tipo_conexion, etiqueta, es_animada)
 SELECT 
     fe.id as id_flujo_estilo,
@@ -709,110 +672,88 @@ JOIN procesos p_destino ON nodo_destino.id_proceso = p_destino.id
 WHERE e.codigo = 'P-2025-02' 
   AND fe.es_actual = TRUE
   AND (
-    -- Flujo secuencial principal según EstilosZip.html
-    (p_origen.codigo = 'PROC-01A' AND p_destino.codigo = 'PROC-02') OR
-    (p_origen.codigo = 'PROC-01B' AND p_destino.codigo = 'PROC-02') OR -- Ambos tejidos van a teñido
-    (p_origen.codigo = 'PROC-02' AND p_destino.codigo = 'PROC-03') OR -- Teñido a lavado (solo jersey)
-    (p_origen.codigo = 'PROC-02' AND p_destino.codigo = 'PROC-04') OR -- Teñido a corte (rib)
-    (p_origen.codigo = 'PROC-03' AND p_destino.codigo = 'PROC-04') OR -- Lavado a corte
-    (p_origen.codigo = 'PROC-04' AND p_destino.codigo = 'PROC-05') OR -- Corte a estampado (solo jersey)
-    (p_origen.codigo = 'PROC-04' AND p_destino.codigo = 'PROC-06') OR -- Corte a confección (rib)
-    (p_origen.codigo = 'PROC-05' AND p_destino.codigo = 'PROC-06') OR -- Estampado a confección
-    (p_origen.codigo = 'PROC-06' AND p_destino.codigo = 'PROC-07')    -- Confección a empaque
+    -- Flujo secuencial principal
+    (p_origen.codigo = 'PROC-001' AND p_destino.codigo = 'PROC-002') OR
+    (p_origen.codigo = 'PROC-002' AND p_destino.codigo = 'PROC-003') OR
+    (p_origen.codigo = 'PROC-003' AND p_destino.codigo = 'PROC-004') OR
+    (p_origen.codigo = 'PROC-003' AND p_destino.codigo = 'PROC-005') OR -- Paralelo
+    (p_origen.codigo = 'PROC-004' AND p_destino.codigo = 'PROC-006') OR
+    (p_origen.codigo = 'PROC-005' AND p_destino.codigo = 'PROC-006') OR -- Convergencia
+    (p_origen.codigo = 'PROC-006' AND p_destino.codigo = 'PROC-007')
   );
 
 -- =============================================
 -- BILL OF MATERIALS (BOM)
 -- =============================================
 
--- Insertar BOM del estilo según EstilosZip.html
-INSERT INTO bom_estilos (id_estilo, id_material, cantidad_base, id_proceso, aplica_talla, aplica_color, es_critico) 
+-- Insertar BOM del estilo con nueva nomenclatura: id_estilo, id_material, id_proceso
+INSERT INTO bom_estilos (id_estilo, id_material, cantidad_base, id_proceso, es_critico) 
 SELECT 
     e.id as id_estilo,
     m.id as id_material,
     CASE m.codigo
-        WHEN 'MAT-001J' THEN 0.200000  -- 200g hilo jersey para talla M
-        WHEN 'MAT-001R' THEN 0.020000  -- 20g hilo rib para talla M
-        WHEN 'MAT-002' THEN 0.011000  -- 11g tinte azul marino
-        WHEN 'MAT-003' THEN 0.015000  -- 15g tinte rojo
-        WHEN 'MAT-004' THEN 0.005000  -- 5g suavizante
-        WHEN 'MAT-005' THEN 0.001000  -- 1L aceite tejeduría
-        WHEN 'MAT-006' THEN 0.010000  -- 10g tinta estampado
-        WHEN 'AVIO-001' THEN 0.002000  -- 0.002 conos hilo costura
-        WHEN 'AVIO-002' THEN 1.000000  -- 1 etiqueta talla
-        WHEN 'AVIO-003' THEN 1.000000  -- 1 etiqueta marca
-        WHEN 'AVIO-004' THEN 1.000000  -- 1 hang tag
-        WHEN 'PACK-001' THEN 1.000000  -- 1 bolsa empaque
+        WHEN 'MAT-001' THEN 0.420000  -- 420g algodón para talla M
+        WHEN 'MAT-002' THEN 0.045000  -- 45g elastano
+        WHEN 'MAT-003' THEN 0.025000  -- 25g tinte (solo para azul marino)
+        WHEN 'MAT-004' THEN 0.025000  -- 25g tinte (solo para rojo)
+        WHEN 'MAT-005' THEN 0.025000  -- 25g tinte (solo para blanco)
+        WHEN 'MAT-006' THEN 0.015000  -- 15g suavizante
+        WHEN 'MAT-007' THEN 0.008000  -- 8g detergente
+        WHEN 'MAT-008' THEN 0.012000  -- 12g tinta (si hay estampado)
+        WHEN 'MAT-009' THEN 1.000000  -- 1 etiqueta talla
+        WHEN 'MAT-010' THEN 1.000000  -- 1 etiqueta composición
+        WHEN 'MAT-011' THEN 1.000000  -- 1 bolsa empaque
     END as cantidad_base,
     CASE m.codigo
-        WHEN 'MAT-001J' THEN p1a.id  -- Hilo jersey en tejido jersey
-        WHEN 'MAT-001R' THEN p1b.id  -- Hilo rib en tejido rib
-        WHEN 'MAT-002' THEN p2.id    -- Tinte azul en teñido
-        WHEN 'MAT-003' THEN p2.id    -- Tinte rojo en teñido
-        WHEN 'MAT-004' THEN p2.id    -- Suavizante en teñido
-        WHEN 'MAT-005' THEN p1a.id   -- Aceite en tejido
-        WHEN 'MAT-006' THEN p5.id    -- Tinta en estampado
-        WHEN 'AVIO-001' THEN p6.id   -- Hilo costura en confección
-        WHEN 'AVIO-002' THEN p7.id   -- Etiqueta talla en empaque
-        WHEN 'AVIO-003' THEN p7.id   -- Etiqueta marca en empaque
-        WHEN 'AVIO-004' THEN p7.id   -- Hang tag en empaque
-        WHEN 'PACK-001' THEN p7.id   -- Bolsa en empaque
+        WHEN 'MAT-001' THEN p1.id  -- Algodón en tejido
+        WHEN 'MAT-002' THEN p1.id  -- Elastano en tejido
+        WHEN 'MAT-003' THEN p2.id  -- Tinte azul en teñido
+        WHEN 'MAT-004' THEN p2.id  -- Tinte rojo en teñido
+        WHEN 'MAT-005' THEN p2.id  -- Tinte blanco en teñido
+        WHEN 'MAT-006' THEN p2.id  -- Suavizante en teñido
+        WHEN 'MAT-007' THEN p2.id  -- Detergente en teñido
+        WHEN 'MAT-008' THEN NULL   -- Tinta (proceso futuro)
+        WHEN 'MAT-009' THEN p7.id  -- Etiqueta talla en empaque
+        WHEN 'MAT-010' THEN p7.id  -- Etiqueta composición en empaque
+        WHEN 'MAT-011' THEN p7.id  -- Bolsa en empaque
     END as id_proceso,
     CASE m.codigo
-        WHEN 'MAT-001J' THEN TRUE    -- Hilo jersey se ajusta por talla
-        WHEN 'MAT-001R' THEN TRUE    -- Hilo rib se ajusta por talla
-        ELSE FALSE
-    END as aplica_talla,
-    CASE m.codigo
-        WHEN 'MAT-002' THEN TRUE     -- Tinte azul es específico por color
-        WHEN 'MAT-003' THEN TRUE     -- Tinte rojo es específico por color
-        ELSE FALSE
-    END as aplica_color,
-    CASE m.codigo
-        WHEN 'MAT-001J' THEN TRUE    -- Hilo jersey es crítico
-        WHEN 'MAT-001R' THEN TRUE    -- Hilo rib es crítico
+        WHEN 'MAT-001' THEN TRUE   -- Algodón es crítico
+        WHEN 'MAT-002' THEN TRUE   -- Elastano es crítico
         ELSE FALSE
     END as es_critico
 FROM estilos e
 CROSS JOIN materiales m
-LEFT JOIN procesos p1a ON p1a.codigo = 'PROC-01A'  -- Tejido Jersey
-LEFT JOIN procesos p1b ON p1b.codigo = 'PROC-01B'  -- Tejido Rib
-LEFT JOIN procesos p2 ON p2.codigo = 'PROC-02'     -- Teñido
-LEFT JOIN procesos p5 ON p5.codigo = 'PROC-05'     -- Estampado
-LEFT JOIN procesos p6 ON p6.codigo = 'PROC-06'     -- Confección
-LEFT JOIN procesos p7 ON p7.codigo = 'PROC-07'     -- Empaque
+LEFT JOIN procesos p1 ON p1.codigo = 'PROC-001'  -- Tejido
+LEFT JOIN procesos p2 ON p2.codigo = 'PROC-002'  -- Teñido  
+LEFT JOIN procesos p7 ON p7.codigo = 'PROC-007'  -- Empaque
 WHERE e.codigo = 'P-2025-02'
   AND m.codigo IN (
-    'MAT-001J', 'MAT-001R', 'MAT-002', 'MAT-003', 'MAT-004', 'MAT-005',
-    'MAT-006', 'AVIO-001', 'AVIO-002', 'AVIO-003', 'AVIO-004', 'PACK-001'
+    'MAT-001', 'MAT-002', 'MAT-003', 'MAT-004', 'MAT-005',
+    'MAT-006', 'MAT-007', 'MAT-009', 'MAT-010', 'MAT-011'
   );
 
 -- =============================================
 -- CÁLCULOS INICIALES POR VARIANTE
 -- =============================================
 
--- Calcular costos por variante según EstilosZip.html
+-- Calcular costos por variante con nueva nomenclatura: id_variante_estilo, id_flujo_estilo
 INSERT INTO calculos_variantes (id_variante_estilo, id_flujo_estilo, costo_materiales, costo_procesos, costo_total, tiempo_total_min, es_actual)
 SELECT 
     ve.id as id_variante_estilo,
     fe.id as id_flujo_estilo,
-    -- Costo de materiales (ajustado por talla y color)
+    -- Costo de materiales (ajustado por talla)
     (
         SELECT ROUND(SUM(
             CASE 
-                WHEN be.aplica_talla THEN 
+                WHEN m.codigo LIKE 'MAT-001%' OR m.codigo LIKE 'MAT-002%' THEN 
                     be.cantidad_base * t.multiplicador_cantidad * m.costo_unitario
-                WHEN be.aplica_color AND c.nombre = ve_color.nombre THEN
+                ELSE 
                     be.cantidad_base * m.costo_unitario
-                WHEN NOT be.aplica_color THEN
-                    be.cantidad_base * m.costo_unitario
-                ELSE 0
             END
         ), 4)
         FROM bom_estilos be
         JOIN materiales m ON be.id_material = m.id
-        LEFT JOIN materiales_colores mc ON m.id = mc.id_material
-        LEFT JOIN colores c ON mc.id_color = c.id
         WHERE be.id_estilo = ve.id_estilo AND be.estado = 'activo'
     ) as costo_materiales,
     
@@ -828,19 +769,14 @@ SELECT
     (
         SELECT ROUND(SUM(
             CASE 
-                WHEN be.aplica_talla THEN 
+                WHEN m.codigo LIKE 'MAT-001%' OR m.codigo LIKE 'MAT-002%' THEN 
                     be.cantidad_base * t.multiplicador_cantidad * m.costo_unitario
-                WHEN be.aplica_color AND c.nombre = ve_color.nombre THEN
+                ELSE 
                     be.cantidad_base * m.costo_unitario
-                WHEN NOT be.aplica_color THEN
-                    be.cantidad_base * m.costo_unitario
-                ELSE 0
             END
         ), 4)
         FROM bom_estilos be
         JOIN materiales m ON be.id_material = m.id
-        LEFT JOIN materiales_colores mc ON m.id = mc.id_material
-        LEFT JOIN colores c ON mc.id_color = c.id
         WHERE be.id_estilo = ve.id_estilo AND be.estado = 'activo'
     ) + (
         SELECT ROUND(SUM(COALESCE(fnp.costo_personalizado, p.costo_base)), 4)
@@ -861,7 +797,6 @@ SELECT
     
 FROM variantes_estilos ve
 JOIN tallas t ON ve.id_talla = t.id
-JOIN colores ve_color ON ve.id_color = ve_color.id
 JOIN flujos_estilos fe ON ve.id_estilo = fe.id_estilo AND fe.es_actual = TRUE
 WHERE ve.estado = 'activo';
 
@@ -954,8 +889,7 @@ SELECT
         'orden', orden_secuencia,
         'es_inicio', es_punto_inicio,
         'es_final', es_punto_final,
-        'es_opcional', es_opcional,
-        'requiere_color', requiere_color
+        'es_opcional', es_opcional
     ) as data,
     JSON_OBJECT(
         'width', ancho,

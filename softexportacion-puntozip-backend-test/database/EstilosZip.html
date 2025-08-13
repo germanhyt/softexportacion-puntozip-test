@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ingeniería de Proceso Textil: Polo "Andes Premium"</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Warm Neutrals (Slate) with Muted Blue/Indigo Accent -->
+    <!-- Application Structure Plan: A single-page dashboard design. The top section provides interactive controls (color/size selectors) and a high-level cost summary. This is followed by visual cost breakdowns (charts), an interactive process flowchart, and a detailed materials table. This structure allows users to go from a high-level overview to deep-dive details intuitively, which is more effective for data exploration than the linear structure of the source report. -->
+    <!-- Visualization & Content Choices: Report Info: Cost data -> Goal: Compare/Inform -> Viz: Chart.js Donut/Bar charts -> Interaction: Updated by selectors -> Justification: Provides immediate visual feedback on cost composition. Report Info: Process Flow -> Goal: Organize/Explore -> Viz: HTML/Tailwind flowchart -> Interaction: Clickable nodes opening a modal with SOP details -> Justification: Transforms a static diagram into an interactive learning tool. Report Info: BOM table -> Goal: Inform -> Viz: HTML Table -> Interaction: Rows are highlighted based on selections -> Justification: Clearly links material requirements to product configuration. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc; /* slate-50 */
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+        .flow-arrow {
+            position: relative;
+            width: 100%;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .flow-arrow::after {
+            content: '↓';
+            font-size: 1.5rem;
+            color: #64748b; /* slate-500 */
+        }
+        .process-box {
+            transition: all 0.2s ease-in-out;
+        }
+        .process-box:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8">
+        
+        <header class="text-center mb-8">
+            <h1 class="text-3xl sm:text-4xl font-bold text-slate-900">Modelo Interactivo de Ingeniería de Proceso</h1>
+            <p class="text-lg text-slate-600 mt-2">Polo con Cuello Rib "Andes Premium" (P-2025-02)</p>
+        </header>
+
+        <main>
+            <!-- Interactive Dashboard Section -->
+            <section id="dashboard" class="bg-white p-6 rounded-xl shadow-lg mb-8">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div class="md:col-span-2">
+                        <h2 class="text-xl font-bold mb-4 text-slate-900">Panel de Control de Costos y Tiempos</h2>
+                        <p class="text-slate-600 mb-4">Seleccione una variante para ver cómo cambian los costos y tiempos en tiempo real. Los cálculos se basan en la Talla M.</p>
+                        <div class="flex flex-col sm:flex-row gap-4">
+                            <div>
+                                <label for="color-selector" class="block text-sm font-medium text-slate-700">Color:</label>
+                                <select id="color-selector" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-slate-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                                    <option value="Azul Marino">Azul Marino</option>
+                                    <option value="Rojo">Rojo</option>
+                                    <option value="Blanco">Blanco</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="talla-selector" class="block text-sm font-medium text-slate-700">Talla:</label>
+                                <select id="talla-selector" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-slate-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                                    <option value="S">S (-5%)</option>
+                                    <option value="M" selected>M (Base)</option>
+                                    <option value="L">L (+5%)</option>
+                                    <option value="XL">XL (+10%)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-center bg-slate-50 p-6 rounded-lg">
+                        <h3 class="text-lg font-semibold text-slate-600">Costo Total</h3>
+                        <p id="total-cost" class="text-4xl font-bold text-indigo-600 mt-2">$0.00</p>
+                    </div>
+                    <div class="text-center bg-slate-50 p-6 rounded-lg">
+                        <h3 class="text-lg font-semibold text-slate-600">Tiempo de Ciclo</h3>
+                        <p id="total-time" class="text-4xl font-bold text-indigo-600 mt-2">0 min</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Charts Section -->
+            <section id="charts" class="mb-8">
+                 <div class="text-center mb-8">
+                    <h2 class="text-2xl font-bold text-slate-900">Desglose de Métricas</h2>
+                    <p class="text-slate-600 mt-1">Visualice la distribución de los costos y tiempos para la variante seleccionada.</p>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div class="bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-lg font-semibold text-center mb-4">Costo: Materiales vs. Procesos</h3>
+                        <div class="chart-container">
+                            <canvas id="cost-distribution-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-lg font-semibold text-center mb-4">Costo por Etapa del Proceso</h3>
+                        <div class="chart-container">
+                            <canvas id="process-cost-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-lg font-semibold text-center mb-4">Tiempo por Etapa del Proceso</h3>
+                        <div class="chart-container">
+                            <canvas id="process-time-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Process Flow Section -->
+            <section id="process-flow" class="mb-8">
+                <div class="text-center mb-8">
+                    <h2 class="text-2xl font-bold text-slate-900">Flujo de Proceso Interactivo</h2>
+                    <p class="text-slate-600 mt-1">Haga clic en cualquier etapa para ver los detalles de la operación (SOP).</p>
+                </div>
+                <div class="bg-white p-6 rounded-xl shadow-lg overflow-x-auto">
+                    <div class="flex flex-col items-center min-w-max">
+                        <div class="grid grid-cols-2 gap-8">
+                            <button data-process="PROC-01A" class="process-box text-center p-4 bg-sky-100 border-2 border-sky-300 rounded-lg cursor-pointer">
+                                <span class="font-semibold">PROC-01A</span><br>Tejido Jersey
+                            </button>
+                            <button data-process="PROC-01B" class="process-box text-center p-4 bg-teal-100 border-2 border-teal-300 rounded-lg cursor-pointer">
+                                <span class="font-semibold">PROC-01B</span><br>Tejido Rib
+                            </button>
+                        </div>
+                        <div class="flow-arrow"></div>
+                        <button data-process="PROC-02" class="process-box text-center p-4 bg-indigo-100 border-2 border-indigo-300 rounded-lg cursor-pointer w-1/2">
+                            <span class="font-semibold">PROC-02</span><br>Teñido y Acabado
+                        </button>
+                        <div class="flow-arrow"></div>
+                        <div class="flex w-full justify-center items-start">
+                            <div class="flex flex-col items-center w-1/2">
+                                <button data-process="PROC-03" class="process-box text-center p-4 bg-rose-100 border-2 border-rose-300 rounded-lg cursor-pointer">
+                                    <span class="font-semibold">PROC-03</span><br>Lavado de Paños (Solo Jersey)
+                                </button>
+                                <div class="flow-arrow"></div>
+                            </div>
+                            <div class="w-1/2 border-l-2 border-dashed border-slate-400 h-24 mt-8"></div>
+                        </div>
+                        <button data-process="PROC-04" class="process-box text-center p-4 bg-amber-100 border-2 border-amber-300 rounded-lg cursor-pointer w-1/2">
+                            <span class="font-semibold">PROC-04</span><br>Corte
+                        </button>
+                        <div class="flow-arrow"></div>
+                         <div class="flex w-full justify-center items-start">
+                            <div class="flex flex-col items-center w-1/2">
+                                <button data-process="PROC-05" class="process-box text-center p-4 bg-purple-100 border-2 border-purple-300 rounded-lg cursor-pointer">
+                                    <span class="font-semibold">PROC-05</span><br>Estampado en Pieza (Solo Jersey)
+                                </button>
+                                <div class="flow-arrow"></div>
+                            </div>
+                            <div class="w-1/2 border-l-2 border-dashed border-slate-400 h-24 mt-8"></div>
+                        </div>
+                        <button data-process="PROC-06" class="process-box text-center p-4 bg-green-100 border-2 border-green-300 rounded-lg cursor-pointer w-1/2">
+                            <span class="font-semibold">PROC-06</span><br>Confección
+                        </button>
+                        <div class="flow-arrow"></div>
+                        <button data-process="PROC-07" class="process-box text-center p-4 bg-slate-200 border-2 border-slate-400 rounded-lg cursor-pointer w-1/2">
+                            <span class="font-semibold">PROC-07</span><br>Acabado y Empaque
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Bill of Materials Section -->
+            <section id="bom">
+                <div class="text-center mb-8">
+                    <h2 class="text-2xl font-bold text-slate-900">Lista de Materiales (BOM)</h2>
+                    <p class="text-slate-600 mt-1">Los materiales requeridos para la variante seleccionada se resaltan en la tabla.</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left text-slate-500">
+                            <thead class="text-xs text-slate-700 uppercase bg-slate-100">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3">ID</th>
+                                    <th scope="col" class="px-6 py-3">Descripción</th>
+                                    <th scope="col" class="px-6 py-3">Unidad</th>
+                                    <th scope="col" class="px-6 py-3">Cantidad/Prenda</th>
+                                    <th scope="col" class="px-6 py-3">Costo Unit.</th>
+                                    <th scope="col" class="px-6 py-3">Costo Total</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bom-table-body">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modal for Process Details -->
+    <div id="process-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-full overflow-y-auto">
+            <div class="p-6">
+                <div class="flex justify-between items-start">
+                    <h2 id="modal-title" class="text-2xl font-bold text-slate-900"></h2>
+                    <button id="modal-close-btn" class="text-slate-500 hover:text-slate-800 text-3xl leading-none">&times;</button>
+                </div>
+                <div class="mt-4">
+                    <h3 class="font-semibold text-lg mb-2">Descripción del Proceso (SOP):</h3>
+                    <p id="modal-description" class="text-slate-600 whitespace-pre-wrap"></p>
+                    
+                    <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <h4 class="font-semibold text-slate-800">Inputs Requeridos:</h4>
+                            <p id="modal-inputs" class="text-slate-600"></p>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold text-slate-800">Output Principal:</h4>
+                            <p id="modal-output" class="text-slate-600"></p>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold text-slate-800">Costo del Proceso:</h4>
+                            <p id="modal-cost" class="text-slate-600"></p>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold text-slate-800">Tiempo del Proceso:</h4>
+                            <p id="modal-time" class="text-slate-600"></p>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold text-slate-800">Merma Esperada:</h4>
+                            <p id="modal-waste" class="text-slate-600"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const bomData = [
+                { id: 'MAT-001J', description: 'Hilo Algodón Pima 24/1 (Para Jersey)', unit: 'kg', quantity: 0.200, cost: 8.50, type: 'jersey' },
+                { id: 'MAT-001R', description: 'Hilo Algodón Pima 24/1 (Para Rib)', unit: 'kg', quantity: 0.020, cost: 8.50, type: 'rib' },
+                { id: 'MAT-002', description: 'Tinte Azul Marino Reactivo', unit: 'kg', quantity: 0.011, cost: 15.00, type: 'dye', color: 'Azul Marino' },
+                { id: 'MAT-003', description: 'Tinte Rojo Reactivo', unit: 'kg', quantity: 0.015, cost: 16.50, type: 'dye', color: 'Rojo' },
+                { id: 'MAT-004', description: 'Suavizante Siliconado', unit: 'kg', quantity: 0.005, cost: 5.00, type: 'chemical' },
+                { id: 'MAT-005', description: 'Aceite de Tejeduría', unit: 'L', quantity: 0.001, cost: 4.00, type: 'chemical' },
+                { id: 'MAT-006', description: 'Tinta de Estampado (Base Agua)', unit: 'kg', quantity: 0.010, cost: 20.00, type: 'print' },
+                { id: 'AVIO-001', description: 'Hilo de Costura (Color)', unit: 'cono', quantity: 0.002, cost: 2.50, type: 'trim' },
+                { id: 'AVIO-002', description: 'Etiqueta de Talla', unit: 'und', quantity: 1, cost: 0.05, type: 'trim' },
+                { id: 'AVIO-003', description: 'Etiqueta de Marca', unit: 'und', quantity: 1, cost: 0.10, type: 'trim' },
+                { id: 'AVIO-004', description: 'Hang Tag de Cartón', unit: 'und', quantity: 1, cost: 0.12, type: 'trim' },
+                { id: 'PACK-001', description: 'Bolsa de Polipropileno', unit: 'und', quantity: 1, cost: 0.08, type: 'trim' },
+            ];
+
+            const processData = [
+                { id: 'PROC-01A', name: 'Tejido Jersey', cost: 0.75, time: 2.5, inputs: 'MAT-001J, MAT-005', output: 'Tela Cruda Jersey', waste: 'Merma de Hilo: 2%', description: 'Alimentar hilos de algodón en tejedora circular (Galga 28). Verificar tensión y gramaje objetivo (180 g/m²).' },
+                { id: 'PROC-01B', name: 'Tejido Rib', cost: 0.15, time: 0.5, inputs: 'MAT-001R, MAT-005', output: 'Tela Cruda Rib', waste: 'Merma de Hilo: 2%', description: 'Alimentar hilo de algodón en tejedora circular para Rib 1x1 (Galga 18). Asegurar elasticidad y recuperación correctas.' },
+                { id: 'PROC-02', name: 'Teñido y Acabado', cost: 1.20, time: 5.0, inputs: 'Out: PROC-01A, 01B. In: MAT-002 (o 003), MAT-004', output: 'Tela Teñida Jersey, Tela Teñida Rib', waste: 'Merma Proceso Húmedo: 3%', description: 'Cargar telas en tina de teñido. Aplicar ciclo reactivo según receta. Controlar pH, temperatura y tiempo.' },
+                { id: 'PROC-03', name: 'Lavado de Paños', cost: 0.30, time: 3.0, inputs: 'Out: PROC-02 (Solo Jersey)', output: 'Tela Jersey Lavada', waste: 'Merma por encogimiento: 1%', description: 'Procesar tela Jersey en lavadora industrial con suavizante para mejorar tacto y estabilizar encogimiento. Secar a temperatura controlada.' },
+                { id: 'PROC-04', name: 'Corte', cost: 0.55, time: 2.0, inputs: 'Out: PROC-03 (Jersey), Out: PROC-02 (Rib)', output: 'Set Piezas Jersey, Set Piezas Rib', waste: 'Retazos de Tela: 15%', description: 'Reposar telas 24h. Tender sobre mesa de corte y posicionar moldes (tizada). Cortar piezas con máquina vertical.' },
+                { id: 'PROC-05', name: 'Estampado en Pieza', cost: 0.60, time: 1.5, inputs: 'Out: PROC-04 (Solo Piezas Jersey), In: MAT-006', output: 'Piezas Jersey Estampadas', waste: 'Merma de Tinta: 5%', description: 'Posicionar piezas en pulpo de serigrafía. Aplicar tinta con raqueta (presión uniforme). Pre-secar y curar en horno a 160°C por 3 min.' },
+                { id: 'PROC-06', name: 'Confección', cost: 2.60, time: 15.0, inputs: 'Out: PROC-05 (Jersey), Out: PROC-04 (Rib), In: AVIO-001, 002, 003', output: 'Prenda Armada', waste: 'Puntas de Hilo: Despreciable', description: 'Ensamblar piezas en línea de producción: remalle, recubierto, pegado de cuello y etiquetas. Usar guías y especificaciones de costura.' },
+                { id: 'PROC-07', name: 'Acabado y Empaque', cost: 0.40, time: 3.0, inputs: 'Out: PROC-06, In: AVIO-004, PACK-001', output: 'Prenda Terminada y Empacada', waste: 'Ninguno', description: 'Inspección final, limpieza de hilos, vaporizado, doblado y embolsado. Colocar hang tag.' },
+            ];
+
+            const colorSelector = document.getElementById('color-selector');
+            const tallaSelector = document.getElementById('talla-selector');
+            const totalCostEl = document.getElementById('total-cost');
+            const totalTimeEl = document.getElementById('total-time');
+            const bomTableBody = document.getElementById('bom-table-body');
+            
+            let costDistributionChart, processCostChart, processTimeChart;
+
+            function getTallaMultiplier(talla) {
+                switch (talla) {
+                    case 'S': return 0.95;
+                    case 'L': return 1.05;
+                    case 'XL': return 1.10;
+                    case 'M':
+                    default: return 1.0;
+                }
+            }
+
+            function calculateMetrics() {
+                const selectedColor = colorSelector.value;
+                const selectedTalla = tallaSelector.value;
+                const tallaMultiplier = getTallaMultiplier(selectedTalla);
+
+                let totalMaterialCost = 0;
+                const activeBomIds = [];
+
+                bomData.forEach(item => {
+                    let itemCost = 0;
+                    let isActive = false;
+                    const isYarn = item.id.includes('MAT-001');
+                    
+                    if (item.type === 'dye') {
+                        if (item.color === selectedColor) {
+                            itemCost = item.quantity * item.cost;
+                            isActive = true;
+                        }
+                    } else if (isYarn) {
+                        itemCost = (item.quantity * tallaMultiplier) * item.cost;
+                        isActive = true;
+                    } else {
+                        itemCost = item.quantity * item.cost;
+                        isActive = true;
+                    }
+
+                    if(isActive) {
+                        totalMaterialCost += itemCost;
+                        activeBomIds.push(item.id);
+                    }
+                });
+
+                const totalProcessCost = processData.reduce((sum, p) => sum + p.cost, 0);
+                const totalCost = totalMaterialCost + totalProcessCost;
+
+                const timeProc01 = Math.max(processData.find(p => p.id === 'PROC-01A').time, processData.find(p => p.id === 'PROC-01B').time);
+                const otherProcessesTime = processData.filter(p => !['PROC-01A', 'PROC-01B'].includes(p.id)).reduce((sum, p) => sum + p.time, 0);
+                const totalProcessTime = timeProc01 + otherProcessesTime;
+
+                return {
+                    totalCost,
+                    totalMaterialCost,
+                    totalProcessCost,
+                    totalProcessTime,
+                    activeBomIds
+                };
+            }
+            
+            function updateUI() {
+                const { totalCost, totalMaterialCost, totalProcessCost, totalProcessTime, activeBomIds } = calculateMetrics();
+                
+                totalCostEl.textContent = `$${totalCost.toFixed(2)}`;
+                totalTimeEl.textContent = `${totalProcessTime.toFixed(1)} min`;
+
+                updateCharts(totalMaterialCost, totalProcessCost);
+                updateBomTable(activeBomIds);
+            }
+
+            function updateCharts(materialCost, processCost) {
+                costDistributionChart.data.datasets[0].data = [materialCost, processCost];
+                costDistributionChart.update();
+                
+                processCostChart.data.datasets[0].data = processData.map(p => p.cost);
+                processCostChart.update();
+
+                processTimeChart.data.datasets[0].data = processData.map(p => p.time);
+                processTimeChart.update();
+            }
+
+            function updateBomTable(activeBomIds) {
+                const selectedTalla = tallaSelector.value;
+                const tallaMultiplier = getTallaMultiplier(selectedTalla);
+                bomTableBody.innerHTML = '';
+                bomData.forEach(item => {
+                    const isActive = activeBomIds.includes(item.id);
+                    const isYarn = item.id.includes('MAT-001');
+                    const quantity = isYarn ? (item.quantity * tallaMultiplier) : item.quantity;
+                    const totalItemCost = quantity * item.cost;
+
+                    const row = document.createElement('tr');
+                    row.className = isActive ? 'bg-indigo-50 border-b border-indigo-100' : 'bg-white border-b';
+                    row.innerHTML = `
+                        <td class="px-6 py-4 font-medium text-slate-900">${item.id}</td>
+                        <td class="px-6 py-4">${item.description}</td>
+                        <td class="px-6 py-4">${item.unit}</td>
+                        <td class="px-6 py-4">${quantity.toFixed(3)}</td>
+                        <td class="px-6 py-4">$${item.cost.toFixed(2)}</td>
+                        <td class="px-6 py-4 font-semibold">$${totalItemCost.toFixed(2)}</td>
+                    `;
+                    bomTableBody.appendChild(row);
+                });
+            }
+
+            function createCharts() {
+                const costDistCtx = document.getElementById('cost-distribution-chart').getContext('2d');
+                costDistributionChart = new Chart(costDistCtx, {
+                    type: 'doughnut',
+                    data: { labels: ['Materiales', 'Procesos'], datasets: [{ data: [0, 0], backgroundColor: ['#4f46e5', '#a5b4fc'], borderColor: '#ffffff', borderWidth: 2 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+                });
+
+                const processCostCtx = document.getElementById('process-cost-chart').getContext('2d');
+                processCostChart = new Chart(processCostCtx, {
+                    type: 'bar',
+                    data: { labels: processData.map(p => p.name), datasets: [{ label: 'Costo del Proceso ($)', data: [], backgroundColor: '#818cf8' }] },
+                    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', scales: { x: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+                });
+
+                const processTimeCtx = document.getElementById('process-time-chart').getContext('2d');
+                processTimeChart = new Chart(processTimeCtx, {
+                    type: 'bar',
+                    data: { labels: processData.map(p => p.name), datasets: [{ label: 'Tiempo del Proceso (min)', data: [], backgroundColor: '#f472b6' }] },
+                    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', scales: { x: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+                });
+            }
+            
+            const modal = document.getElementById('process-modal');
+            const modalCloseBtn = document.getElementById('modal-close-btn');
+            const modalTitle = document.getElementById('modal-title');
+            const modalDescription = document.getElementById('modal-description');
+            const modalInputs = document.getElementById('modal-inputs');
+            const modalOutput = document.getElementById('modal-output');
+            const modalCost = document.getElementById('modal-cost');
+            const modalTime = document.getElementById('modal-time');
+            const modalWaste = document.getElementById('modal-waste');
+
+            document.querySelectorAll('.process-box').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const processId = e.currentTarget.dataset.process;
+                    const data = processData.find(p => p.id === processId);
+                    if (data) {
+                        modalTitle.textContent = `${data.id}: ${data.name}`;
+                        modalDescription.textContent = data.description;
+                        modalInputs.textContent = data.inputs;
+                        modalOutput.textContent = data.output;
+                        modalCost.textContent = `$${data.cost.toFixed(2)}`;
+                        modalTime.textContent = `${data.time.toFixed(1)} min`;
+                        modalWaste.textContent = data.waste;
+                        modal.classList.remove('hidden');
+                        modal.classList.add('flex');
+                    }
+                });
+            });
+
+            function closeModal() {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+
+            modalCloseBtn.addEventListener('click', closeModal);
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    closeModal();
+                }
+            });
+
+            createCharts();
+            updateUI();
+
+            colorSelector.addEventListener('change', updateUI);
+            tallaSelector.addEventListener('change', updateUI);
+        });
+    </script>
+</body>
+</html>

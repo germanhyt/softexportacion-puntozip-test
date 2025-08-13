@@ -34,10 +34,7 @@ class CalculoVariante extends Model
     const UPDATED_AT = null;
     const CREATED_AT = 'fecha_calculo';
 
-    // ============================================================================
-    // RELACIONES
-    // ============================================================================
-
+    // Relaciones
     public function varianteEstilo(): BelongsTo
     {
         return $this->belongsTo(VarianteEstilo::class, 'id_variante_estilo');
@@ -48,10 +45,7 @@ class CalculoVariante extends Model
         return $this->belongsTo(FlujoEstilo::class, 'id_flujo_estilo');
     }
 
-    // ============================================================================
-    // SCOPES
-    // ============================================================================
-
+    // Scopes
     public function scopeActuales($query)
     {
         return $query->where('es_actual', true);
@@ -67,47 +61,28 @@ class CalculoVariante extends Model
         return $query->where('id_flujo_estilo', $flujoId);
     }
 
-    // ============================================================================
-    // MÉTODOS AUXILIARES
-    // ============================================================================
-
-    /**
-     * Marcar este cálculo como actual
-     */
+    // Métodos de utilidad
     public function marcarComoActual()
     {
         // Desmarcar otros cálculos de la misma variante
-        self::where('id_variante_estilo', $this->id_variante_estilo)
+        static::where('id_variante_estilo', $this->id_variante_estilo)
             ->where('id', '!=', $this->id)
             ->update(['es_actual' => false]);
-
-        // Marcar este como actual
+            
         $this->update(['es_actual' => true]);
+        
+        return $this;
     }
 
-    /**
-     * Obtener costo por unidad
-     */
-    public function getCostoPorUnidadAttribute()
+    public function getPorcentajeMaterialesAttribute()
     {
-        return $this->costo_total;
+        if ($this->costo_total == 0) return 0;
+        return round(($this->costo_materiales / $this->costo_total) * 100, 2);
     }
 
-    /**
-     * Obtener porcentaje de costo de materiales
-     */
-    public function getPorcentajeCostoMaterialesAttribute()
+    public function getPorcentajeProcesosAttribute()
     {
-        if ($this->costo_total <= 0) return 0;
-        return ($this->costo_materiales / $this->costo_total) * 100;
-    }
-
-    /**
-     * Obtener porcentaje de costo de procesos
-     */
-    public function getPorcentajeCostoProcesosAttribute()
-    {
-        if ($this->costo_total <= 0) return 0;
-        return ($this->costo_procesos / $this->costo_total) * 100;
+        if ($this->costo_total == 0) return 0;
+        return round(($this->costo_procesos / $this->costo_total) * 100, 2);
     }
 }

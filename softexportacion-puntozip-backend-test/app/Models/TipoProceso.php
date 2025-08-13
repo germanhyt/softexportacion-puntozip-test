@@ -25,26 +25,58 @@ class TipoProceso extends Model
     const UPDATED_AT = null;
     const CREATED_AT = 'fecha_creacion';
 
-    // Relaciones
+    // Constantes para estados
+    const ESTADO_ACTIVO = 'activo';
+    const ESTADO_INACTIVO = 'inactivo';
+
+    // ============================================================================
+    // RELACIONES
+    // ============================================================================
+
     public function procesos(): HasMany
     {
         return $this->hasMany(Proceso::class, 'id_tipo_proceso');
     }
 
-    // Scopes
+    // ============================================================================
+    // SCOPES
+    // ============================================================================
+
     public function scopeActivos($query)
     {
-        return $query->where('estado', 'activo');
+        return $query->where('estado', self::ESTADO_ACTIVO);
     }
 
-    // Métodos de utilidad
-    public function getTotalProcesosAttribute()
+    public function scopeInactivos($query)
     {
-        return $this->procesos()->count();
+        return $query->where('estado', self::ESTADO_INACTIVO);
     }
 
-    public function getProcesosActivosAttribute()
+    // ============================================================================
+    // MÉTODOS AUXILIARES
+    // ============================================================================
+
+    /**
+     * Métodos estáticos para obtener opciones
+     */
+    public static function getEstados()
     {
-        return $this->procesos()->where('estado', 'activo')->count();
+        return [
+            self::ESTADO_ACTIVO,
+            self::ESTADO_INACTIVO
+        ];
+    }
+
+    /**
+     * Obtener tipos disponibles para dropdown
+     */
+    public static function getTiposDisponibles()
+    {
+        return self::activos()
+                   ->orderBy('nombre')
+                   ->get()
+                   ->mapWithKeys(function($tipo) {
+                       return [$tipo->id => $tipo->nombre];
+                   });
     }
 }

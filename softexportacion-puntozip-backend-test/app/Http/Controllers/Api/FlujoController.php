@@ -2,13 +2,17 @@
 
 namespace App\Http\Controllers\Api;
 
-use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
+use App\Http\Controllers\Controller;
 use App\Models\FlujoEstilo;
 use App\Models\FlujoNodoProceso;
 use App\Models\FlujoConexion;
+use App\Models\Estilo;
+use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\DB;
 
-class FlujoController
+class FlujoController extends Controller
 {
     /**
      * Listar flujos por estilo
@@ -16,15 +20,27 @@ class FlujoController
     public function listarFlujosPorEstilo(string $estiloId): JsonResponse
     {
         try {
-            $flujos = FlujoEstilo::where('id_estilo', $estiloId)
-                ->orderBy('es_actual', 'desc')
-                ->orderBy('version', 'desc')
-                ->get();
+            $estilo = Estilo::findOrFail($estiloId);
+            
+            $flujos = FlujoEstilo::porEstilo($estiloId)
+                                ->with(['nodos.proceso', 'conexiones'])
+                                ->orderByDesc('version')
+                                ->get();
 
             return response()->json([
                 'success' => true,
-                'data' => $flujos
+                'data' => [
+                    'estilo' => $estilo,
+                    'flujos' => $flujos,
+                    'flujo_actual' => $flujos->where('es_actual', true)->first()
+                ]
             ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Estilo no encontrado'
+            ], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -35,87 +51,42 @@ class FlujoController
     }
 
     /**
-     * Obtener flujo completo para @xyflow/react
+     * Obtener flujo completo para el editor visual (ReactFlow)
      */
     public function obtenerFlujo(string $estiloId, string $flujoId): JsonResponse
     {
         try {
+            $estilo = Estilo::findOrFail($estiloId);
             $flujo = FlujoEstilo::with([
                 'nodos.proceso.tipoProceso',
-                'conexiones.nodoOrigen.proceso',
-                'conexiones.nodoDestino.proceso'
-            ])->where('id_estilo', $estiloId)
-              ->findOrFail($flujoId);
+                'conexiones.nodoOrigen',
+                'conexiones.nodoDestino'
+            ])->findOrFail($flujoId);
 
-            $nodos = $flujo->nodos->map(function ($nodo) {
-                $proceso = $nodo->proceso;
-                return [
-                    'id' => (string) $nodo->id,
-                    'type' => 'customNode',
-                    'pos_x' => (float) $nodo->pos_x,
-                    'pos_y' => (float) $nodo->pos_y,
-                    'position' => [ // compat frontend
-                        'x' => (float) $nodo->pos_x,
-                        'y' => (float) $nodo->pos_y,
-                    ],
-                    'data' => [
-                        'id_proceso' => $nodo->id_proceso,
-                        'nombre' => $proceso->nombre,
-                        'descripcion' => $proceso->descripcion,
-                        'tiempo_base_min' => (float) ($proceso->tiempo_base_min ?? 0),
-                        'costo_base' => (float) ($proceso->costo_base ?? 0),
-                        'tipo_proceso' => $proceso->tipoProceso ? [
-                            'nombre' => $proceso->tipoProceso->nombre,
-                            'color_hex' => $proceso->tipoProceso->color_hex,
-                        ] : null,
-                        'orden_secuencia' => $nodo->orden_secuencia,
-                        'es_paralelo' => (bool) ($proceso->es_paralelo ?? false),
-                        'tiempo_personalizado_min' => $nodo->tiempo_personalizado_min,
-                        'costo_personalizado' => $nodo->costo_personalizado,
-                        'es_opcional' => (bool) $nodo->es_opcional,
-                        'es_punto_inicio' => (bool) $nodo->es_punto_inicio,
-                        'es_punto_final' => (bool) $nodo->es_punto_final,
-                        'notas' => $nodo->notas,
-                    ],
-                    'style' => [
-                        'width' => (float) ($nodo->ancho ?? 200),
-                        'height' => (float) ($nodo->alto ?? 80),
-                    ]
-                ];
-            });
+            // Verificar que el flujo pertenece al estilo
+            if ($flujo->id_estilo != $estiloId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El flujo no pertenece al estilo especificado'
+                ], 400);
+            }
 
-            $conexiones = $flujo->conexiones->map(function ($conexion) {
-                return [
-                    'id' => (string) $conexion->id,
-                    'source' => (string) $conexion->id_nodo_origen,
-                    'target' => (string) $conexion->id_nodo_destino,
-                    'type' => $conexion->tipo_conexion === 'secuencial' ? 'smoothstep' : 'default',
-                    'data' => [
-                        'condicion_activacion' => $conexion->condicion_activacion,
-                        'orden_prioridad' => $conexion->orden_prioridad,
-                        'etiqueta' => $conexion->etiqueta,
-                        'estilo_linea' => $conexion->estilo_linea,
-                        'color_linea' => $conexion->color_linea,
-                        'es_animada' => (bool) $conexion->es_animada,
-                    ],
-                    'animated' => (bool) $conexion->es_animada,
-                    'style' => [ 'stroke' => $conexion->color_linea ?? '#64748B' ]
-                ];
-            });
+            $datosReactFlow = $flujo->getDatosParaReactFlow();
+            $validacion = $flujo->validarConsistencia();
 
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'flujo' => $flujo->only(['id','id_estilo','nombre','descripcion','version','estado','costo_total_calculado','tiempo_total_calculado','es_actual']),
-                    'nodes' => $nodos,
-                    'edges' => $conexiones
+                    'estilo' => $estilo,
+                    'flujo' => $datosReactFlow,
+                    'validacion' => $validacion
                 ]
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Flujo no encontrado'
+                'message' => 'Estilo o flujo no encontrado'
             ], 404);
         } catch (\Exception $e) {
             return response()->json([
@@ -127,74 +98,129 @@ class FlujoController
     }
 
     /**
-     * Guardar flujo desde @xyflow/react
+     * Guardar nuevo flujo desde el editor visual
      */
     public function guardarFlujo(Request $request, string $estiloId): JsonResponse
     {
         try {
-            $request->validate([
-                'nombre' => 'required|string|max:100',
-                'descripcion' => 'nullable|string',
-                'version' => 'nullable|string|max:20',
+            $estilo = Estilo::findOrFail($estiloId);
+
+            $validated = $request->validate([
+                'nombre' => 'required|string|max:200',
                 'nodes' => 'required|array',
-                'edges' => 'required|array'
+                'nodes.*.id' => 'required|string',
+                'nodes.*.position' => 'required|array',
+                'nodes.*.position.x' => 'required|numeric',
+                'nodes.*.position.y' => 'required|numeric',
+                'nodes.*.data' => 'required|array',
+                'nodes.*.data.id_proceso' => 'required|exists:procesos,id',
+                'nodes.*.data.es_punto_inicio' => 'boolean',
+                'nodes.*.data.es_punto_final' => 'boolean',
+                'nodes.*.data.costo_personalizado' => 'nullable|numeric|min:0',
+                'nodes.*.data.tiempo_personalizado_min' => 'nullable|numeric|min:0',
+                'nodes.*.data.notas' => 'nullable|string',
+                'edges' => 'required|array',
+                'edges.*.id' => 'required|string',
+                'edges.*.source' => 'required|string',
+                'edges.*.target' => 'required|string',
+                'edges.*.data' => 'nullable|array',
+                'edges.*.data.tipo_conexion' => 'nullable|in:secuencial,condicional,paralelo',
+                'edges.*.data.etiqueta' => 'nullable|string|max:100',
+                'edges.*.data.condicion_activacion' => 'nullable|string|max:500'
             ]);
 
-            $flujo = FlujoEstilo::create([
-                'id_estilo' => $estiloId,
-                'nombre' => $request->nombre,
-                'descripcion' => $request->descripcion,
-                'version' => $request->version ?? '1.0',
-                'estado' => 'activo',
-                'es_actual' => false
-            ]);
+            DB::beginTransaction();
 
-            $mapIds = [];
-            foreach ($request->nodes as $node) {
-                $posX = $node['pos_x'] ?? ($node['position']['x'] ?? 0);
-                $posY = $node['pos_y'] ?? ($node['position']['y'] ?? 0);
-                $orden = $node['data']['orden_secuencia'] ?? ($node['data']['orden_ejecucion'] ?? 1);
-                $nodo = FlujoNodoProceso::create([
-                    'id_flujo_estilo' => $flujo->id,
-                    'id_proceso' => $node['data']['id_proceso'],
-                    'pos_x' => $posX,
-                    'pos_y' => $posY,
-                    'ancho' => $node['style']['width'] ?? 200,
-                    'alto' => $node['style']['height'] ?? 80,
-                    'orden_secuencia' => $orden,
-                    'tiempo_personalizado_min' => $node['data']['tiempo_personalizado_min'] ?? null,
-                    'costo_personalizado' => $node['data']['costo_personalizado'] ?? null,
-                    'es_opcional' => $node['data']['es_opcional'] ?? false,
-                    'es_punto_inicio' => $node['data']['es_punto_inicio'] ?? false,
-                    'es_punto_final' => $node['data']['es_punto_final'] ?? false,
-                    'notas' => $node['data']['notas'] ?? null,
-                    'estado' => 'activo'
+            try {
+                // Crear flujo
+                $version = FlujoEstilo::where('id_estilo', $estiloId)->max('version') + 1;
+                
+                $flujo = FlujoEstilo::create([
+                    'id_estilo' => $estiloId,
+                    'nombre' => $validated['nombre'],
+                    'version' => $version,
+                    'estado' => 'borrador'
                 ]);
-                $mapIds[$node['id']] = $nodo->id;
+
+                // Mapear IDs de nodos ReactFlow a IDs de base de datos
+                $mapeoNodos = [];
+                $ordenSecuencia = 1;
+
+                // Crear nodos
+                foreach ($validated['nodes'] as $node) {
+                    $nodo = FlujoNodoProceso::create([
+                        'id_flujo_estilo' => $flujo->id,
+                        'id_proceso' => $node['data']['id_proceso'],
+                        'orden_secuencia' => $ordenSecuencia++,
+                        'pos_x' => $node['position']['x'],
+                        'pos_y' => $node['position']['y'],
+                        'ancho' => $node['data']['ancho'] ?? 200,
+                        'alto' => $node['data']['alto'] ?? 80,
+                        'costo_personalizado' => $node['data']['costo_personalizado'] ?? null,
+                        'tiempo_personalizado_min' => $node['data']['tiempo_personalizado_min'] ?? null,
+                        'es_punto_inicio' => $node['data']['es_punto_inicio'] ?? false,
+                        'es_punto_final' => $node['data']['es_punto_final'] ?? false,
+                        'notas' => $node['data']['notas'] ?? null
+                    ]);
+
+                    $mapeoNodos[$node['id']] = $nodo->id;
+                }
+
+                // Crear conexiones
+                foreach ($validated['edges'] as $edge) {
+                    if (!isset($mapeoNodos[$edge['source']]) || !isset($mapeoNodos[$edge['target']])) {
+                        continue; // Saltar conexiones con nodos inexistentes
+                    }
+
+                    FlujoConexion::create([
+                        'id_flujo_estilo' => $flujo->id,
+                        'id_nodo_origen' => $mapeoNodos[$edge['source']],
+                        'id_nodo_destino' => $mapeoNodos[$edge['target']],
+                        'tipo_conexion' => $edge['data']['tipo_conexion'] ?? 'secuencial',
+                        'etiqueta' => $edge['data']['etiqueta'] ?? null,
+                        'condicion_activacion' => $edge['data']['condicion_activacion'] ?? null,
+                        'color_linea' => '#64748B',
+                        'orden_prioridad' => 1
+                    ]);
+                }
+
+                // Calcular totales del flujo
+                $flujo->calcularTotales();
+
+                // Validar consistencia
+                $validacion = $flujo->validarConsistencia();
+
+                if (!$validacion['es_valido']) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'El flujo contiene errores de consistencia',
+                        'errors' => $validacion['errores']
+                    ], 422);
+                }
+
+                DB::commit();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Flujo guardado exitosamente',
+                    'data' => [
+                        'flujo' => $flujo->load(['nodos.proceso', 'conexiones']),
+                        'validacion' => $validacion
+                    ]
+                ], 201);
+
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
             }
 
-            foreach ($request->edges as $edge) {
-                FlujoConexion::create([
-                    'id_flujo_estilo' => $flujo->id,
-                    'id_nodo_origen' => $mapIds[$edge['source']] ?? null,
-                    'id_nodo_destino' => $mapIds[$edge['target']] ?? null,
-                    'tipo_conexion' => $edge['data']['tipo_conexion'] ?? 'secuencial',
-                    'condicion_activacion' => $edge['data']['condicion_activacion'] ?? null,
-                    'etiqueta' => $edge['data']['etiqueta'] ?? null,
-                    'estilo_linea' => $edge['data']['estilo_linea'] ?? 'solida',
-                    'color_linea' => $edge['data']['color_linea'] ?? '#64748B',
-                    'es_animada' => $edge['data']['es_animada'] ?? false,
-                    'orden_prioridad' => $edge['data']['orden_prioridad'] ?? 1,
-                    'estado' => 'activo'
-                ]);
-            }
-
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
-                'success' => true,
-                'message' => 'Flujo guardado exitosamente',
-                'data' => $flujo->load(['nodos.proceso.tipoProceso', 'conexiones'])
-            ], 201);
-        } catch (\Illuminate\Validation\ValidationException $e) {
+                'success' => false,
+                'message' => 'Estilo no encontrado'
+            ], 404);
+        } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Error de validación',
@@ -210,39 +236,46 @@ class FlujoController
     }
 
     /**
-     * Actualizar posiciones de nodos
+     * Actualizar posiciones de nodos en tiempo real
      */
     public function actualizarPosiciones(Request $request, string $flujoId): JsonResponse
     {
         try {
-            // Aceptar formato nuevo (nodos[{id,pos_x,pos_y}]) o antiguo (nodes[].position.x)
-            $payloadNodes = $request->get('nodos') ?? $request->get('nodes');
-            if (!is_array($payloadNodes)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Formato de nodos inválido'
-                ], 422);
-            }
+            $flujo = FlujoEstilo::findOrFail($flujoId);
 
-            foreach ($payloadNodes as $nodeData) {
-                $id = $nodeData['id'] ?? null;
-                if (!$id) continue;
-                $x = $nodeData['pos_x'] ?? ($nodeData['position']['x'] ?? null);
-                $y = $nodeData['pos_y'] ?? ($nodeData['position']['y'] ?? null);
-                if ($x === null || $y === null) continue;
+            $validated = $request->validate([
+                'nodos' => 'required|array',
+                'nodos.*.id' => 'required|exists:flujos_nodos_procesos,id',
+                'nodos.*.pos_x' => 'required|numeric',
+                'nodos.*.pos_y' => 'required|numeric'
+            ]);
 
-                FlujoNodoProceso::where('id', $id)
-                    ->where('id_flujo_estilo', $flujoId)
-                    ->update([
-                        'pos_x' => $x,
-                        'pos_y' => $y
-                    ]);
+            foreach ($validated['nodos'] as $nodoData) {
+                $nodo = FlujoNodoProceso::where('id', $nodoData['id'])
+                                      ->where('id_flujo_estilo', $flujoId)
+                                      ->first();
+
+                if ($nodo) {
+                    $nodo->actualizarPosicion($nodoData['pos_x'], $nodoData['pos_y']);
+                }
             }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Posiciones actualizadas'
+                'message' => 'Posiciones actualizadas exitosamente'
             ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Flujo no encontrado'
+            ], 404);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -253,22 +286,39 @@ class FlujoController
     }
 
     /**
-     * Eliminar flujo
+     * Eliminar flujo completo
      */
     public function eliminarFlujo(string $flujoId): JsonResponse
     {
         try {
             $flujo = FlujoEstilo::findOrFail($flujoId);
 
-            // Eliminar conexiones
-            $flujo->conexiones()->delete();
+            // No permitir eliminar el flujo actual si es el único
+            if ($flujo->es_actual) {
+                $otrosFlujos = FlujoEstilo::where('id_estilo', $flujo->id_estilo)
+                                        ->where('id', '!=', $flujoId)
+                                        ->exists();
 
-            // Eliminar nodos
-            $flujo->nodos()->delete();
+                if (!$otrosFlujos) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'No se puede eliminar el único flujo del estilo'
+                    ], 400);
+                }
 
-            // Eliminar flujo
-            $flujo->delete();
-            
+                // Si hay otros flujos, marcar el más reciente como actual
+                $flujoMasReciente = FlujoEstilo::where('id_estilo', $flujo->id_estilo)
+                                             ->where('id', '!=', $flujoId)
+                                             ->orderByDesc('version')
+                                             ->first();
+
+                if ($flujoMasReciente) {
+                    $flujoMasReciente->marcarComoActual();
+                }
+            }
+
+            $flujo->delete(); // Esto también eliminará nodos y conexiones por CASCADE
+
             return response()->json([
                 'success' => true,
                 'message' => 'Flujo eliminado exitosamente'
@@ -289,23 +339,19 @@ class FlujoController
     }
 
     /**
-     * Calcular tiempo total del flujo
+     * Calcular tiempo y costo total del flujo
      */
     public function calcularTiempoTotal(string $flujoId): JsonResponse
     {
         try {
-            $flujo = FlujoEstilo::with('nodos.proceso')->findOrFail($flujoId);
-            $tiempoTotalMin = $flujo->nodos->sum(function ($nodo) { return $nodo->getTiempoEfectivoAttribute(); });
-            $costoTotal = $flujo->nodos->sum(function ($nodo) { return $nodo->getCostoEfectivoAttribute(); });
+            $flujo = FlujoEstilo::with(['nodos.proceso'])->findOrFail($flujoId);
+            $resultado = $flujo->calcularTotales();
 
             return response()->json([
                 'success' => true,
-                'data' => [
-                    'tiempo_total_min' => round($tiempoTotalMin, 2),
-                    'costo_total' => round($costoTotal, 4),
-                    'numero_procesos' => $flujo->nodos->count()
-                ]
+                'data' => $resultado
             ]);
+
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -314,7 +360,173 @@ class FlujoController
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al calcular tiempo',
+                'message' => 'Error al calcular totales del flujo',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Marcar flujo como actual
+     */
+    public function marcarComoActual(string $flujoId): JsonResponse
+    {
+        try {
+            $flujo = FlujoEstilo::findOrFail($flujoId);
+
+            // Validar que el flujo esté en estado activo
+            if ($flujo->estado !== 'activo') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Solo se pueden marcar como actuales los flujos en estado activo'
+                ], 400);
+            }
+
+            $flujo->marcarComoActual();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Flujo marcado como actual exitosamente',
+                'data' => $flujo
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Flujo no encontrado'
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al marcar flujo como actual',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Activar flujo (cambiar de borrador a activo)
+     */
+    public function activarFlujo(string $flujoId): JsonResponse
+    {
+        try {
+            $flujo = FlujoEstilo::findOrFail($flujoId);
+
+            // Validar consistencia antes de activar
+            $validacion = $flujo->validarConsistencia();
+            if (!$validacion['es_valido']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No se puede activar el flujo porque contiene errores',
+                    'errors' => $validacion['errores']
+                ], 422);
+            }
+
+            $flujo->update(['estado' => 'activo']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Flujo activado exitosamente',
+                'data' => $flujo
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Flujo no encontrado'
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al activar el flujo',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Duplicar flujo con nueva versión
+     */
+    public function duplicarFlujo(string $flujoId): JsonResponse
+    {
+        try {
+            $flujoOriginal = FlujoEstilo::with(['nodos', 'conexiones'])->findOrFail($flujoId);
+            $nuevoFlujo = $flujoOriginal->duplicarConNuevaVersion();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Flujo duplicado exitosamente',
+                'data' => $nuevoFlujo->load(['nodos.proceso', 'conexiones'])
+            ], 201);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Flujo no encontrado'
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al duplicar el flujo',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Validar consistencia del flujo
+     */
+    public function validarConsistencia(string $flujoId): JsonResponse
+    {
+        try {
+            $flujo = FlujoEstilo::with(['nodos.proceso', 'conexiones'])->findOrFail($flujoId);
+            $validacion = $flujo->validarConsistencia();
+
+            return response()->json([
+                'success' => true,
+                'data' => $validacion
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Flujo no encontrado'
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al validar consistencia',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener plantilla de flujo vacío para ReactFlow
+     */
+    public function getPlantillaVacia(): JsonResponse
+    {
+        try {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'flujo' => [
+                        'id' => null,
+                        'nombre' => 'Nuevo Flujo',
+                        'version' => 1,
+                        'estado' => 'borrador',
+                        'es_actual' => false,
+                        'costo_total' => 0,
+                        'tiempo_total' => 0
+                    ],
+                    'nodes' => [],
+                    'edges' => []
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener plantilla',
                 'error' => $e->getMessage()
             ], 500);
         }

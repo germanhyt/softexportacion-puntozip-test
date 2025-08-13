@@ -1,0 +1,312 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
+use App\Models\Estilo;
+use App\Models\CalculoVariante;
+use App\Models\VarianteEstilo;
+use App\Models\Color;
+use App\Models\Talla;
+use Illuminate\Support\Facades\DB;
+
+class CalculoVarianteController
+{
+    /**
+     * Calcular variante completa con lógica textil
+     */
+    public function calcularVariante(Request $request, string $estiloId): JsonResponse
+    {
+        try {
+            $request->validate([
+                'color_id' => 'required|exists:colores,id',
+                'talla_id' => 'required|exists:tallas,id',
+                'cantidad_piezas' => 'required|integer|min:1',
+                'incluir_procesos_opcionales' => 'boolean'
+            ]);
+
+            $estilo = Estilo::with([
+                'bomItems.material.categoria',
+                'bomItems.material.colores',
+                'bomItems.proceso',
+                'flujos.nodos.proceso',
+                'variantes.color'
+            ])->findOrFail($estiloId);
+
+            $color = Color::findOrFail($request->color_id);
+            $talla = Talla::findOrFail($request->talla_id);
+            $cantidadPiezas = $request->cantidad_piezas;
+            $incluirOpcionales = $request->incluir_procesos_opcionales ?? false;
+
+            // Multiplicador de talla
+            $multiplicadorTalla = $talla->multiplicador ?? 1.0;
+
+            // Calcular BOM con lógica textil
+            $bomCalculado = $this->calcularBOM($estilo, $color, $talla, $cantidadPiezas);
+            
+            // Calcular flujo de procesos
+            $flujoCalculado = $this->calcularFlujo($estilo, $color, $incluirOpcionales, $cantidadPiezas);
+
+            // Calcular totales
+            $costoTotalMateriales = collect($bomCalculado)->sum('costo_total');
+            $costoTotalProcesos = collect($flujoCalculado)->sum('costo_total');
+            $tiempoTotalProcesos = collect($flujoCalculado)->sum('tiempo_total');
+            $costoTotal = $costoTotalMateriales + $costoTotalProcesos;
+
+            // Guardar o actualizar cálculo
+            $calculo = $this->guardarCalculo($estilo, $color, $talla, $cantidadPiezas, $costoTotal, $tiempoTotalProcesos);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'calculo_id' => $calculo->id,
+                    'estilo' => [
+                        'id' => $estilo->id,
+                        'codigo' => $estilo->codigo,
+                        'nombre' => $estilo->nombre,
+                        'tipo_producto' => $estilo->tipo_producto
+                    ],
+                    'variante' => [
+                        'color' => $color->nombre,
+                        'talla' => $talla->nombre,
+                        'cantidad_piezas' => $cantidadPiezas,
+                        'multiplicador_talla' => $multiplicadorTalla
+                    ],
+                    'costos' => [
+                        'materiales' => round($costoTotalMateriales, 2),
+                        'procesos' => round($costoTotalProcesos, 2),
+                        'total' => round($costoTotal, 2),
+                        'por_pieza' => round($costoTotal / $cantidadPiezas, 2)
+                    ],
+                    'tiempo' => [
+                        'total_minutos' => round($tiempoTotalProcesos, 2),
+                        'por_pieza_minutos' => round($tiempoTotalProcesos / $cantidadPiezas, 2)
+                    ],
+                    'bom' => $bomCalculado,
+                    'flujo_procesos' => $flujoCalculado
+                ]
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al calcular variante',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Calcular BOM con lógica textil específica
+     */
+    private function calcularBOM($estilo, $color, $talla, $cantidadPiezas): array
+    {
+        $bomCalculado = [];
+        $multiplicadorTalla = $talla->multiplicador ?? 1.0;
+
+        foreach ($estilo->bomItems as $bomItem) {
+            $material = $bomItem->material;
+            
+            // Verificar si el material aplica para esta variante
+            $incluirMaterial = true;
+            
+            // Si aplica color, verificar que el material tenga el color
+            if ($bomItem->aplica_color) {
+                $tieneColor = $material->colores->contains('id', $color->id);
+                if (!$tieneColor) {
+                    $incluirMaterial = false;
+                }
+            }
+
+            if (!$incluirMaterial) {
+                continue;
+            }
+
+            // Calcular cantidad base
+            $cantidadBase = $bomItem->cantidad_base;
+            
+            // Aplicar multiplicador de talla si corresponde
+            if ($bomItem->aplica_talla) {
+                $cantidadBase *= $multiplicadorTalla;
+            }
+
+            // Aplicar cantidad de piezas
+            $cantidadTotal = $cantidadBase * $cantidadPiezas;
+
+            // Calcular costo
+            $costoUnitario = $material->costo_unitario;
+            $costoTotal = $cantidadTotal * $costoUnitario;
+
+            $bomCalculado[] = [
+                'material_id' => $material->id,
+                'material_codigo' => $material->codigo,
+                'material_nombre' => $material->nombre,
+                'tipo_material' => $material->tipo_material,
+                'categoria' => $material->categoria->nombre,
+                'unidad_medida' => $material->unidadMedida->simbolo,
+                'cantidad_base' => $bomItem->cantidad_base,
+                'cantidad_final' => round($cantidadTotal, 4),
+                'costo_unitario' => round($costoUnitario, 4),
+                'costo_total' => round($costoTotal, 2),
+                'aplica_talla' => $bomItem->aplica_talla,
+                'aplica_color' => $bomItem->aplica_color,
+                'es_critico' => $bomItem->es_critico,
+                'proceso' => $bomItem->proceso ? [
+                    'id' => $bomItem->proceso->id,
+                    'codigo' => $bomItem->proceso->codigo,
+                    'nombre' => $bomItem->proceso->nombre
+                ] : null
+            ];
+        }
+
+        return $bomCalculado;
+    }
+
+    /**
+     * Calcular flujo de procesos
+     */
+    private function calcularFlujo($estilo, $color, $incluirOpcionales, $cantidadPiezas): array
+    {
+        $flujoCalculado = [];
+
+        foreach ($estilo->flujos as $flujo) {
+            foreach ($flujo->nodos as $nodo) {
+                $proceso = $nodo->proceso;
+                
+                // Verificar si incluir procesos opcionales
+                if ($proceso->es_opcional && !$incluirOpcionales) {
+                    continue;
+                }
+
+                // Verificar si requiere color
+                if ($proceso->requiere_color) {
+                    // Lógica específica para procesos que requieren color
+                    // Por ejemplo, teñido solo se aplica si hay color
+                    if ($color->nombre === 'Natural' || $color->nombre === 'Blanco') {
+                        continue; // No aplicar teñido para colores naturales
+                    }
+                }
+
+                $tiempoBase = $proceso->tiempo_base_min;
+                $costoBase = $proceso->costo_base;
+                
+                // Aplicar cantidad de piezas
+                $tiempoTotal = $tiempoBase * $cantidadPiezas;
+                $costoTotal = $costoBase * $cantidadPiezas;
+
+                $flujoCalculado[] = [
+                    'proceso_id' => $proceso->id,
+                    'proceso_codigo' => $proceso->codigo,
+                    'proceso_nombre' => $proceso->nombre,
+                    'tipo_proceso' => $proceso->tipoProceso->nombre,
+                    'tiempo_base_min' => $tiempoBase,
+                    'tiempo_total' => round($tiempoTotal, 2),
+                    'costo_base' => round($costoBase, 2),
+                    'costo_total' => round($costoTotal, 2),
+                    'es_opcional' => $proceso->es_opcional,
+                    'requiere_color' => $proceso->requiere_color,
+                    'es_paralelo' => $proceso->es_paralelo,
+                    'orden_secuencia' => $nodo->orden_secuencia
+                ];
+            }
+        }
+
+        // Ordenar por secuencia
+        usort($flujoCalculado, function($a, $b) {
+            return $a['orden_secuencia'] <=> $b['orden_secuencia'];
+        });
+
+        return $flujoCalculado;
+    }
+
+    /**
+     * Guardar o actualizar cálculo en la base de datos
+     */
+    private function guardarCalculo($estilo, $color, $talla, $cantidadPiezas, $costoTotal, $tiempoTotal): CalculoVariante
+    {
+        // Buscar variante existente o crear nueva
+        $variante = VarianteEstilo::firstOrCreate([
+            'id_estilo' => $estilo->id,
+            'id_color' => $color->id,
+            'id_talla' => $talla->id
+        ], [
+            'codigo_variante' => "{$estilo->codigo}-{$color->codigo}-{$talla->codigo}",
+            'estado' => 'activo'
+        ]);
+
+        // Desactivar cálculos anteriores
+        CalculoVariante::where('id_variante_estilo', $variante->id)
+            ->update(['es_actual' => false]);
+
+        // Crear nuevo cálculo
+        return CalculoVariante::create([
+            'id_variante_estilo' => $variante->id,
+            'cantidad_piezas' => $cantidadPiezas,
+            'costo_total' => $costoTotal,
+            'tiempo_total_min' => $tiempoTotal,
+            'es_actual' => true,
+            'fecha_calculo' => now()
+        ]);
+    }
+
+    /**
+     * Obtener historial de cálculos de una variante
+     */
+    public function obtenerHistorial(string $estiloId, string $colorId, string $tallaId): JsonResponse
+    {
+        try {
+            $variante = VarianteEstilo::where([
+                'id_estilo' => $estiloId,
+                'id_color' => $colorId,
+                'id_talla' => $tallaId
+            ])->first();
+
+            if (!$variante) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Variante no encontrada'
+                ], 404);
+            }
+
+            $calculos = CalculoVariante::where('id_variante_estilo', $variante->id)
+                ->orderBy('fecha_calculo', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'variante' => [
+                        'id' => $variante->id,
+                        'codigo' => $variante->codigo_variante,
+                        'color' => $variante->color->nombre,
+                        'talla' => $variante->talla->nombre
+                    ],
+                    'calculos' => $calculos->map(function($calculo) {
+                        return [
+                            'id' => $calculo->id,
+                            'cantidad_piezas' => $calculo->cantidad_piezas,
+                            'costo_total' => round($calculo->costo_total, 2),
+                            'tiempo_total_min' => round($calculo->tiempo_total_min, 2),
+                            'es_actual' => $calculo->es_actual,
+                            'fecha_calculo' => $calculo->fecha_calculo->format('Y-m-d H:i:s')
+                        ];
+                    })
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener historial',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+}

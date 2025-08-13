@@ -1,75 +1,72 @@
 <?php
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\CategoriaMaterialController;
-use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\EstiloController;
-use App\Http\Controllers\Api\FlujoController;
+use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\ProcesoController;
+use App\Http\Controllers\Api\TallaController;
 use App\Http\Controllers\Api\ColorController;
 use App\Http\Controllers\Api\BomEstiloController;
+use App\Http\Controllers\Api\FlujoController;
+use App\Http\Controllers\Api\CalculoVarianteController;
 
-/*
-|--------------------------------------------------------------------------
-| API Routes - Sistema Textil
-|--------------------------------------------------------------------------
-|
-| Rutas API para el sistema de gestión textil que incluye:
-| - Gestión de materiales y categorías
-| - Gestión de estilos y variantes
-| - Gestión de flujos de procesos para @xyflow/react
-| - Cálculos de costos y tiempos
-|
-*/
-
+// Grupo de rutas de la API textil v1
 Route::prefix('v1')->group(function () {
     
-    // ===== CATEGORÍAS DE MATERIALES =====
-    Route::apiResource('categorias-materiales', CategoriaMaterialController::class);
+    // ===== ESTILOS =====
+    Route::prefix('estilos')->group(function () {
+        Route::get('/', [EstiloController::class, 'index']);
+        Route::post('/', [EstiloController::class, 'store']);
+        Route::get('/resumen', [EstiloController::class, 'getResumen']);
+        Route::get('/tipos-producto', [EstiloController::class, 'getTiposProducto']);
+        Route::get('/temporadas', [EstiloController::class, 'getTemporadas']);
+        Route::get('/estados', [EstiloController::class, 'getEstados']);
+        
+        Route::get('/{id}', [EstiloController::class, 'show']);
+        Route::put('/{id}', [EstiloController::class, 'update']);
+        Route::delete('/{id}', [EstiloController::class, 'destroy']);
+        Route::post('/{id}/duplicar', [EstiloController::class, 'duplicar']);
+        
+        // BOM del estilo
+        Route::get('/{id}/bom', [BomEstiloController::class, 'porEstilo']);
+        Route::post('/{id}/bom', [BomEstiloController::class, 'actualizarBom']);
+        Route::post('/{id}/bom/calcular-variante', [BomEstiloController::class, 'calcularPorVariante']);
+        
+        // Flujos del estilo
+        Route::get('/{estilo_id}/flujos', [FlujoController::class, 'listarFlujosPorEstilo']);
+        Route::get('/{estilo_id}/flujos/{flujo_id}', [FlujoController::class, 'obtenerFlujo']);
+        Route::post('/{estilo_id}/flujos', [FlujoController::class, 'guardarFlujo']);
+        
+        // Cálculos de variantes
+        Route::post('/{id}/calcular-variante-textil', [CalculoVarianteController::class, 'calcularVariante']);
+        Route::get('/{estilo_id}/variantes/{color_id}/{talla_id}/historial', [CalculoVarianteController::class, 'obtenerHistorial']);
+    });
 
     // ===== MATERIALES =====
+    Route::get('materiales/tipos-material', [MaterialController::class, 'getTiposMaterial']);
+    Route::get('materiales/criticos', [MaterialController::class, 'getMaterialesCriticos']);
     Route::apiResource('materiales', MaterialController::class);
-    Route::post('materiales/{id}/colores', [MaterialController::class, 'asociarColores']);
-
-    // ===== ESTILOS =====
-    Route::apiResource('estilos', EstiloController::class);
-    Route::get('estilos/{id}/costos', [EstiloController::class, 'calcularCostos']);
-    Route::post('estilos/{id}/calcular-variante', [EstiloController::class, 'calcularPorVariante']);
 
     // ===== PROCESOS =====
+    Route::get('procesos/tipos-proceso', [ProcesoController::class, 'getTiposProceso']);
+    Route::get('procesos/para-reactflow', [ProcesoController::class, 'getParaReactFlow']);
+    Route::get('procesos/{id}/sop', [ProcesoController::class, 'getSOP']);
     Route::apiResource('procesos', ProcesoController::class);
-    Route::get('procesos/{id}/sop', [ProcesoController::class, 'obtenerSOP']);
 
     // ===== COLORES =====
     Route::apiResource('colores', ColorController::class);
 
-    // ===== BOM (BILL OF MATERIALS) =====
-    Route::get('estilos/{id}/bom', [BomEstiloController::class, 'porEstilo']);
-    Route::post('estilos/{id}/bom', [BomEstiloController::class, 'actualizarBom']);
-    Route::post('estilos/{id}/bom/calcular-variante', [BomEstiloController::class, 'calcularPorVariante']);
+    // ===== TALLAS =====
+    Route::get('tallas/disponibles', [TallaController::class, 'getTallasDisponibles']);
+    Route::apiResource('tallas', TallaController::class);
 
-    // ===== FLUJOS DE PROCESOS =====
-    // Listar flujos por estilo
-    Route::get('estilos/{estilo_id}/flujos', [FlujoController::class, 'listarFlujosPorEstilo']);
-    
-    // Obtener flujo completo para el editor visual
-    Route::get('estilos/{estilo_id}/flujos/{flujo_id}', [FlujoController::class, 'obtenerFlujo']);
-    
-    // Guardar nuevo flujo desde el editor visual
-    Route::post('estilos/{estilo_id}/flujos', [FlujoController::class, 'guardarFlujo']);
-    
-    // Actualizar posiciones de nodos en tiempo real
+    // ===== FLUJOS =====
     Route::patch('flujos/{flujo_id}/posiciones', [FlujoController::class, 'actualizarPosiciones']);
-    
-    // Eliminar flujo completo
     Route::delete('flujos/{flujo_id}', [FlujoController::class, 'eliminarFlujo']);
-    
-    // Calcular tiempo y costo total del flujo
     Route::get('flujos/{flujo_id}/calcular-tiempo', [FlujoController::class, 'calcularTiempoTotal']);
 
-    // ===== RUTAS DE UTILIDADES =====
-    
-    // Obtener datos para dropdowns/selects
+    // ===== UTILIDADES =====
     Route::get('utils/temporadas', function () {
         return response()->json([
             'success' => true,
@@ -94,69 +91,7 @@ Route::prefix('v1')->group(function () {
     Route::get('utils/tipos-proceso', function () {
         return response()->json([
             'success' => true,
-            'data' => ['corte', 'costura', 'terminado', 'control_calidad', 'empaque']
-        ]);
-    });
-
-    // ===== RUTAS PARA REPORTES Y DASHBOARD =====
-    
-    Route::get('dashboard/resumen', function () {
-        // Esta sería una ruta para obtener datos del dashboard
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'total_estilos' => 0, // Se implementaría la lógica real
-                'total_materiales' => 0,
-                'estilos_activos' => 0,
-                'flujos_creados' => 0
-            ]
-        ]);
-    });
-
-    Route::get('reportes/costos-por-estilo', function () {
-        // Reporte de costos por estilo
-        return response()->json([
-            'success' => true,
-            'data' => [] // Se implementaría la lógica real
-        ]);
-    });
-
-    // ===== RUTAS PARA BÚSQUEDA GLOBAL =====
-    
-    Route::get('buscar', function (\Illuminate\Http\Request $request) {
-        $termino = $request->get('q', '');
-        
-        if (empty($termino)) {
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'estilos' => [],
-                    'materiales' => []
-                ]
-            ]);
-        }
-
-        // Implementar búsqueda en múltiples modelos
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'estilos' => [], // App\Models\Estilo::where('nombre', 'like', "%{$termino}%")->limit(5)->get()
-                'materiales' => [] // App\Models\Material::where('nombre', 'like', "%{$termino}%")->limit(5)->get()
-            ]
+            'data' => ['Tejido', 'Teñido', 'Corte', 'Confección', 'Estampado', 'Acabado', 'Lavado', 'Control de Calidad', 'Empaque']
         ]);
     });
 });
-
-// ===== RUTAS PARA HEALTH CHECK =====
-Route::get('health', function () {
-    return response()->json([
-        'status' => 'ok',
-        'timestamp' => now()->toISOString(),
-        'version' => '1.0.0'
-    ]);
-});
-
-// ===== RUTAS PARA CORS PREFLIGHT =====
-Route::options('{any}', function () {
-    return response()->json([], 200);
-})->where('any', '.*');

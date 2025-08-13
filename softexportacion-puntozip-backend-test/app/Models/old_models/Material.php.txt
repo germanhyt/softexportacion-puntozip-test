@@ -1,0 +1,112 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+
+class Material extends Model
+{
+    protected $table = 'materiales';
+    
+    protected $fillable = [
+        'codigo',
+        'nombre',
+        'id_categoria',
+        'id_unidad_medida',
+        'costo_unitario',
+        'stock_actual',
+        'proveedor',
+        'estado',
+        'tipo_material',
+        'es_critico'
+    ];
+
+    protected $casts = [
+        'costo_unitario' => 'decimal:4',
+        'stock_actual' => 'decimal:4',
+        'es_critico' => 'boolean',
+        'fecha_creacion' => 'datetime',
+        'fecha_actualizacion' => 'datetime'
+    ];
+
+    const UPDATED_AT = 'fecha_actualizacion';
+    const CREATED_AT = 'fecha_creacion';
+
+    // Constantes para tipos de material
+    const TIPO_HILO = 'hilo';
+    const TIPO_TINTE = 'tinte';
+    const TIPO_QUIMICO = 'quimico';
+    const TIPO_TINTA = 'tinta';
+    const TIPO_AVIO = 'avio';
+    const TIPO_EMPAQUE = 'empaque';
+
+    // Relaciones
+    public function categoria(): BelongsTo
+    {
+        return $this->belongsTo(CategoriaMaterial::class, 'id_categoria');
+    }
+
+    public function unidadMedida(): BelongsTo
+    {
+        return $this->belongsTo(UnidadMedida::class, 'id_unidad_medida');
+    }
+
+    public function colores(): BelongsToMany
+    {
+        return $this->belongsToMany(Color::class, 'materiales_colores', 'id_material', 'id_color')
+                    ->withPivot('costo_adicional', 'estado')
+                    ->withTimestamps();
+    }
+
+    public function recetas(): HasMany
+    {
+        return $this->hasMany(RecetaMaterial::class, 'id_material');
+    }
+
+    // Scopes
+    public function scopeActivos($query)
+    {
+        return $query->where('estado', 'activo');
+    }
+
+    public function scopePorCategoria($query, $categoriaId)
+    {
+        return $query->where('id_categoria', $categoriaId);
+    }
+
+    public function scopeConStock($query)
+    {
+        return $query->whereRaw('stock_minimo > 0');
+    }
+
+    public function scopePorTipoMaterial($query, $tipo)
+    {
+        return $query->where('tipo_material', $tipo);
+    }
+
+    public function scopeCriticos($query)
+    {
+        return $query->where('es_critico', true);
+    }
+
+    public function scopeNoCriticos($query)
+    {
+        return $query->where('es_critico', false);
+    }
+
+    // Método para obtener tipos de material disponibles
+    public static function getTiposMaterial()
+    {
+        return [
+            self::TIPO_HILO => 'Hilo',
+            self::TIPO_TINTE => 'Tinte',
+            self::TIPO_QUIMICO => 'Químico',
+            self::TIPO_TINTA => 'Tinta',
+            self::TIPO_AVIO => 'Avío',
+            self::TIPO_EMPAQUE => 'Empaque'
+        ];
+    }
+}

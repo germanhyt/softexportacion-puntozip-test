@@ -4,21 +4,23 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
-class Color extends Model
+class Talla extends Model
 {
-    protected $table = 'colores';
+    protected $table = 'tallas';
     protected $primaryKey = 'id';
     
     protected $fillable = [
+        'codigo',
         'nombre',
-        'codigo_hex',
-        'codigo_pantone',
+        'multiplicador_cantidad',
+        'orden',
         'estado'
     ];
 
     protected $casts = [
+        'multiplicador_cantidad' => 'decimal:3',
+        'orden' => 'integer',
         'fecha_creacion' => 'datetime'
     ];
 
@@ -35,32 +37,52 @@ class Color extends Model
 
     public function variantes(): HasMany
     {
-        return $this->hasMany(VarianteEstilo::class, 'id_color');
-    }
-
-    public function materiales(): BelongsToMany
-    {
-        return $this->belongsToMany(Material::class, 'materiales_colores', 'id_color', 'id_material')
-                    ->withPivot('costo_adicional', 'estado', 'fecha_creacion');
+        return $this->hasMany(VarianteEstilo::class, 'id_talla');
     }
 
     // ============================================================================
     // SCOPES
     // ============================================================================
 
-    public function scopeActivos($query)
+    public function scopeActivas($query)
     {
         return $query->where('estado', self::ESTADO_ACTIVO);
     }
 
-    public function scopeInactivos($query)
+    public function scopeInactivas($query)
     {
         return $query->where('estado', self::ESTADO_INACTIVO);
+    }
+
+    public function scopePorOrden($query)
+    {
+        return $query->orderBy('orden', 'asc');
     }
 
     // ============================================================================
     // MÉTODOS AUXILIARES
     // ============================================================================
+
+    /**
+     * Obtener tallas disponibles para dropdown
+     */
+    public static function getTallasDisponibles()
+    {
+        return self::activas()
+                   ->porOrden()
+                   ->get()
+                   ->mapWithKeys(function($talla) {
+                       return [$talla->id => $talla->nombre];
+                   });
+    }
+
+    /**
+     * Obtener multiplicador de cantidad para cálculos
+     */
+    public function getMultiplicadorAttribute()
+    {
+        return $this->multiplicador_cantidad;
+    }
 
     /**
      * Métodos estáticos para obtener opciones
@@ -71,18 +93,5 @@ class Color extends Model
             self::ESTADO_ACTIVO,
             self::ESTADO_INACTIVO
         ];
-    }
-
-    /**
-     * Obtener colores disponibles para dropdown
-     */
-    public static function getColoresDisponibles()
-    {
-        return self::activos()
-                   ->orderBy('nombre')
-                   ->get()
-                   ->mapWithKeys(function($color) {
-                       return [$color->id => $color->nombre];
-                   });
     }
 }

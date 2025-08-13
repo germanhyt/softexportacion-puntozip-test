@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class CategoriaMaterial extends Model
 {
     protected $table = 'categorias_materiales';
+    protected $primaryKey = 'id';
     
     protected $fillable = [
         'nombre',
@@ -23,15 +24,58 @@ class CategoriaMaterial extends Model
     const UPDATED_AT = 'fecha_actualizacion';
     const CREATED_AT = 'fecha_creacion';
 
-    // Relaciones
+    // Constantes para estados
+    const ESTADO_ACTIVO = 'activo';
+    const ESTADO_INACTIVO = 'inactivo';
+
+    // ============================================================================
+    // RELACIONES
+    // ============================================================================
+
     public function materiales(): HasMany
     {
         return $this->hasMany(Material::class, 'id_categoria');
     }
 
-    // Scopes
-    public function scopeActivos($query)
+    // ============================================================================
+    // SCOPES
+    // ============================================================================
+
+    public function scopeActivas($query)
     {
-        return $query->where('estado', 'activo');
+        return $query->where('estado', self::ESTADO_ACTIVO);
+    }
+
+    public function scopeInactivas($query)
+    {
+        return $query->where('estado', self::ESTADO_INACTIVO);
+    }
+
+    // ============================================================================
+    // MÉTODOS AUXILIARES
+    // ============================================================================
+
+    /**
+     * Métodos estáticos para obtener opciones
+     */
+    public static function getEstados()
+    {
+        return [
+            self::ESTADO_ACTIVO,
+            self::ESTADO_INACTIVO
+        ];
+    }
+
+    /**
+     * Obtener categorías disponibles para dropdown
+     */
+    public static function getCategoriasDisponibles()
+    {
+        return self::activas()
+                   ->orderBy('nombre')
+                   ->get()
+                   ->mapWithKeys(function($categoria) {
+                       return [$categoria->id => $categoria->nombre];
+                   });
     }
 }

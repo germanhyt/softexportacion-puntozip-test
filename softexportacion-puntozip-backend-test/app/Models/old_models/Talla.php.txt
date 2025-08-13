@@ -1,0 +1,54 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class Talla extends Model
+{
+    protected $table = 'tallas';
+    protected $primaryKey = 'id';
+    
+    protected $fillable = [
+        'codigo',
+        'nombre',
+        'descripcion',
+        'multiplicador',
+        'estado'
+    ];
+
+    protected $casts = [
+        'multiplicador' => 'decimal:4',
+        'fecha_creacion' => 'datetime',
+        'fecha_actualizacion' => 'datetime'
+    ];
+
+    const UPDATED_AT = 'fecha_actualizacion';
+    const CREATED_AT = 'fecha_creacion';
+
+    // Relaciones
+    public function variantes(): HasMany
+    {
+        return $this->hasMany(VarianteEstilo::class, 'talla', 'codigo');
+    }
+
+    // Scopes
+    public function scopeActivas($query)
+    {
+        return $query->where('estado', 'activo');
+    }
+
+    public function scopePorOrden($query)
+    {
+        return $query->orderBy('multiplicador', 'asc');
+    }
+
+    // Método para obtener tallas disponibles
+    public static function getTallasDisponibles()
+    {
+        return self::activas()->porOrden()->get()->mapWithKeys(function($talla) {
+            return [$talla->id => $talla->nombre];
+        });
+    }
+}

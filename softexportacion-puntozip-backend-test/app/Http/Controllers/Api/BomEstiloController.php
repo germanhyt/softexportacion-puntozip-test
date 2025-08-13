@@ -2,65 +2,51 @@
 
 namespace App\Http\Controllers\Api;
 
-use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
+use App\Http\Controllers\Controller;
 use App\Models\BomEstilo;
 use App\Models\Estilo;
+use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\ValidationException;
 
-class BomEstiloController
+class BomEstiloController extends Controller
 {
     /**
-     * Obtener BOM (Bill of Materials) por estilo
+     * Obtener BOM de un estilo específico
      */
     public function porEstilo(string $estiloId): JsonResponse
     {
         try {
             $estilo = Estilo::findOrFail($estiloId);
             
-            $bomItems = BomEstilo::with(['material.categoria', 'material.unidadMedida', 'proceso'])
-                                ->where('id_estilo', $estiloId)
-                                ->where('estado', 'activo')
+            $bomItems = BomEstilo::porEstilo($estiloId)
+                                ->with([
+                                    'material.categoria',
+                                    'material.unidadMedida',
+                                    'proceso'
+                                ])
+                                ->activos()
                                 ->get();
 
-            // Formatear items según la estructura de la BD
-            $bomFormatted = $bomItems->map(function ($item) {
-                return [
-                    'id' => $item->id,
-                    'id_material' => $item->id_material,
-                    'material' => [
-                        'codigo' => $item->material->codigo,
-                        'nombre' => $item->material->nombre,
-                        'categoria' => [
-                            'nombre' => $item->material->categoria->nombre ?? 'Sin categoría'
-                        ],
-                        'unidad_medida' => [
-                            'nombre' => $item->material->unidadMedida->nombre ?? 'Unidades',
-                            'codigo' => $item->material->unidadMedida->codigo ?? 'ud'
-                        ],
-                        'costo_unitario' => (float) $item->material->costo_unitario
-                    ],
-                    'cantidad_base' => (float) $item->cantidad_base,
-                    'es_critico' => (bool) $item->es_critico,
-                    'proceso' => $item->proceso ? [
-                        'nombre' => $item->proceso->nombre
-                    ] : null
-                ];
-            });
+            // Obtener estadísticas del BOM
+            $estadisticas = BomEstilo::getEstadisticasPorEstilo($estiloId);
 
-            $resumen = [
-                'total_items' => $bomItems->count(),
-                'costo_total_materiales' => $bomItems->sum(function ($item) {
-                    return $item->cantidad_base * $item->material->costo_unitario;
-                }),
-                'items_criticos' => $bomItems->where('es_critico', true)->count()
-            ];
+            // Transformar datos para incluir cálculos
+            $bomDetallado = $bomItems->map(function($item) {
+                return $item->getInfoCompleta();
+            });
 
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'estilo' => $estilo->only(['id', 'nombre', 'codigo']),
-                    'bom_items' => $bomFormatted,
-                    'resumen' => $resumen
+                    'estilo' => $estilo,
+                    'bom_items' => $bomDetallado,
+                    'estadisticas' => $estadisticas,
+                    'resumen' => [
+                        'total_items' => $bomItems->count(),
+                        'costo_total_materiales' => $estadisticas['costo_total_materiales'],
+                        'items_criticos' => $estadisticas['items_criticos']
+                    ]
                 ]
             ]);
 
@@ -72,57 +58,69 @@ class BomEstiloController
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al obtener BOM',
+                'message' => 'Error al obtener BOM del estilo',
                 'error' => $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Actualizar BOM completo para un estilo
+     * Actualizar BOM completo de un estilo
      */
     public function actualizarBom(Request $request, string $estiloId): JsonResponse
     {
         try {
-            $request->validate([
+            $estilo = Estilo::findOrFail($estiloId);
+
+            $validated = $request->validate([
                 'items' => 'required|array',
                 'items.*.id_material' => 'required|exists:materiales,id',
                 'items.*.cantidad_base' => 'required|numeric|min:0',
                 'items.*.id_proceso' => 'nullable|exists:procesos,id',
+                'items.*.aplica_talla' => 'boolean',
+                'items.*.aplica_color' => 'boolean',
                 'items.*.es_critico' => 'boolean'
             ]);
 
-            $estilo = Estilo::findOrFail($estiloId);
-
-            // Eliminar BOM existente
+            // Eliminar items existentes del BOM
             BomEstilo::where('id_estilo', $estiloId)->delete();
 
-            // Crear nuevos items de BOM
-            foreach ($request->items as $itemData) {
-                BomEstilo::create([
-                    'id_estilo' => $estiloId,
-                    'id_material' => $itemData['id_material'],
-                    'cantidad_base' => $itemData['cantidad_base'],
-                    'id_proceso' => $itemData['id_proceso'] ?? null,
-                    'es_critico' => $itemData['es_critico'] ?? false,
-                    'estado' => 'activo'
-                ]);
+            // Crear nuevos items
+            $itemsCreados = [];
+            foreach ($validated['items'] as $itemData) {
+                $itemData['id_estilo'] = $estiloId;
+                $itemData['aplica_talla'] = $itemData['aplica_talla'] ?? true;
+                $itemData['aplica_color'] = $itemData['aplica_color'] ?? false;
+                $itemData['es_critico'] = $itemData['es_critico'] ?? false;
+                
+                $bomItem = BomEstilo::create($itemData);
+                $itemsCreados[] = $bomItem->load(['material.categoria', 'material.unidadMedida', 'proceso']);
             }
 
-            // Recalcular y devolver BOM actualizado
-            return $this->porEstilo($estiloId);
+            // Obtener estadísticas actualizadas
+            $estadisticas = BomEstilo::getEstadisticasPorEstilo($estiloId);
 
-        } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
-                'success' => false,
-                'message' => 'Error de validación',
-                'errors' => $e->errors()
-            ], 422);
+                'success' => true,
+                'message' => 'BOM actualizado exitosamente',
+                'data' => [
+                    'items_creados' => count($itemsCreados),
+                    'bom_items' => $itemsCreados,
+                    'estadisticas' => $estadisticas
+                ]
+            ]);
+
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Estilo no encontrado'
             ], 404);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -133,73 +131,102 @@ class BomEstiloController
     }
 
     /**
-     * Calcular costo de BOM por variante (color/talla)
+     * Calcular BOM para una variante específica (talla y color)
      */
     public function calcularPorVariante(Request $request, string $estiloId): JsonResponse
     {
         try {
-            $request->validate([
-                'color' => 'nullable|string',
-                'talla' => 'required|string|in:XS,S,M,L,XL,XXL',
+            $estilo = Estilo::findOrFail($estiloId);
+
+            $validated = $request->validate([
+                'id_talla' => 'required|exists:tallas,id',
+                'id_color' => 'nullable|exists:colores,id',
                 'cantidad_piezas' => 'required|integer|min:1'
             ]);
 
-            $bomItems = BomEstilo::with(['material'])
-                                ->where('id_estilo', $estiloId)
+            $bomItems = BomEstilo::porEstilo($estiloId)
+                                ->with([
+                                    'material.categoria',
+                                    'material.unidadMedida',
+                                    'proceso'
+                                ])
+                                ->activos()
                                 ->get();
 
-            // Multiplicadores por talla
-            $tallaMultipliers = [
-                'XS' => 0.90,
-                'S' => 0.95,
-                'M' => 1.00,
-                'L' => 1.05,
-                'XL' => 1.10,
-                'XXL' => 1.15
-            ];
+            if ($bomItems->isEmpty()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El estilo no tiene BOM definido'
+                ], 404);
+            }
 
-            $multiplier = $tallaMultipliers[$request->talla] ?? 1.0;
-            $cantidadPiezas = $request->cantidad_piezas;
+            // Obtener multiplicador de talla
+            $talla = \App\Models\Talla::findOrFail($validated['id_talla']);
+            $multiplicadorTalla = $talla->multiplicador_cantidad;
 
-            $calculoDetallado = $bomItems->map(function ($item) use ($multiplier, $cantidadPiezas) {
-                $cantidadAjustada = $item->cantidad_base * $multiplier;
-                $cantidadConMerma = $cantidadAjustada * 1.02; // 2% merma estándar
-                $cantidadTotal = $cantidadConMerma * $cantidadPiezas;
-                $costoTotal = $cantidadTotal * $item->material->costo_base;
+            // Calcular BOM para la variante
+            $bomCalculado = $bomItems->map(function($item) use ($multiplicadorTalla, $validated) {
+                $infoCompleta = $item->getInfoCompleta($multiplicadorTalla, $validated['id_color']);
+                
+                // Calcular para la cantidad de piezas solicitada
+                $cantidadTotalRequerida = $infoCompleta['bom_item']['cantidad_final'] * $validated['cantidad_piezas'];
+                $costoTotalRequerido = $infoCompleta['costos']['costo_total'] * $validated['cantidad_piezas'];
 
-                return [
-                    'material' => $item->material->nombre,
-                    'cantidad_base' => $item->cantidad_base,
-                    'cantidad_ajustada_talla' => round($cantidadAjustada, 4),
-                    'cantidad_con_merma' => round($cantidadConMerma, 4),
-                    'cantidad_total' => round($cantidadTotal, 2),
-                    'costo_unitario' => $item->material->costo_base,
-                    'costo_total' => round($costoTotal, 2),
-                    'es_critico' => $item->es_critico
+                $infoCompleta['calculo_produccion'] = [
+                    'cantidad_piezas' => $validated['cantidad_piezas'],
+                    'cantidad_total_requerida' => $cantidadTotalRequerida,
+                    'costo_total_requerido' => $costoTotalRequerido,
+                    'stock_suficiente' => $item->material->stock_actual >= $cantidadTotalRequerida
                 ];
+
+                return $infoCompleta;
             });
 
-            $costoTotalBom = $calculoDetallado->sum('costo_total');
+            // Calcular totales
+            $costoTotalMateriales = $bomCalculado->sum('calculo_produccion.costo_total_requerido');
+            $itemsConStockInsuficiente = $bomCalculado->where('calculo_produccion.stock_suficiente', false)->count();
+
+            // Verificar disponibilidad total
+            $stockSuficiente = $itemsConStockInsuficiente === 0;
+
+            $resumen = [
+                'variante' => [
+                    'estilo_id' => $estiloId,
+                    'estilo_nombre' => $estilo->nombre,
+                    'talla_id' => $validated['id_talla'],
+                    'talla_nombre' => $talla->nombre,
+                    'multiplicador_talla' => $multiplicadorTalla,
+                    'color_id' => $validated['id_color'],
+                    'cantidad_piezas' => $validated['cantidad_piezas']
+                ],
+                'costos' => [
+                    'total_materiales' => $costoTotalMateriales,
+                    'costo_por_pieza' => $costoTotalMateriales / $validated['cantidad_piezas']
+                ],
+                'disponibilidad' => [
+                    'stock_suficiente' => $stockSuficiente,
+                    'items_sin_stock' => $itemsConStockInsuficiente,
+                    'total_items' => $bomCalculado->count()
+                ],
+                'alertas' => $bomCalculado->flatMap(function($item) {
+                    return $item['alertas'] ?? [];
+                })->toArray()
+            ];
 
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'estilo_id' => $estiloId,
-                    'variante' => [
-                        'color' => $request->color,
-                        'talla' => $request->talla,
-                        'cantidad_piezas' => $cantidadPiezas
-                    ],
-                    'calculo_detallado' => $calculoDetallado,
-                    'resumen' => [
-                        'costo_total_materiales' => round($costoTotalBom, 2),
-                        'costo_por_pieza' => round($costoTotalBom / $cantidadPiezas, 2),
-                        'multiplier_talla' => $multiplier
-                    ]
+                    'bom_calculado' => $bomCalculado,
+                    'resumen' => $resumen
                 ]
             ]);
 
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Estilo o talla no encontrada'
+            ], 404);
+        } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Error de validación',
@@ -209,6 +236,162 @@ class BomEstiloController
             return response()->json([
                 'success' => false,
                 'message' => 'Error al calcular BOM por variante',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Agregar item al BOM
+     */
+    public function agregarItem(Request $request, string $estiloId): JsonResponse
+    {
+        try {
+            $estilo = Estilo::findOrFail($estiloId);
+
+            $validated = $request->validate([
+                'id_material' => 'required|exists:materiales,id',
+                'cantidad_base' => 'required|numeric|min:0',
+                'id_proceso' => 'nullable|exists:procesos,id',
+                'aplica_talla' => 'boolean',
+                'aplica_color' => 'boolean',
+                'es_critico' => 'boolean'
+            ]);
+
+            // Verificar que no exista ya este material en el BOM
+            $existeItem = BomEstilo::where('id_estilo', $estiloId)
+                                  ->where('id_material', $validated['id_material'])
+                                  ->exists();
+
+            if ($existeItem) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Este material ya existe en el BOM del estilo'
+                ], 400);
+            }
+
+            $validated['id_estilo'] = $estiloId;
+            $validated['aplica_talla'] = $validated['aplica_talla'] ?? true;
+            $validated['aplica_color'] = $validated['aplica_color'] ?? false;
+            $validated['es_critico'] = $validated['es_critico'] ?? false;
+
+            $bomItem = BomEstilo::create($validated);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Item agregado al BOM exitosamente',
+                'data' => $bomItem->load(['material.categoria', 'material.unidadMedida', 'proceso'])
+            ], 201);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Estilo no encontrado'
+            ], 404);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al agregar item al BOM',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Eliminar item del BOM
+     */
+    public function eliminarItem(string $bomItemId): JsonResponse
+    {
+        try {
+            $bomItem = BomEstilo::findOrFail($bomItemId);
+            $bomItem->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Item eliminado del BOM exitosamente'
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Item del BOM no encontrado'
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al eliminar item del BOM',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener reporte de BOM
+     */
+    public function getReporte(string $estiloId, Request $request): JsonResponse
+    {
+        try {
+            $estilo = Estilo::findOrFail($estiloId);
+
+            $validated = $request->validate([
+                'id_talla' => 'nullable|exists:tallas,id',
+                'id_color' => 'nullable|exists:colores,id'
+            ]);
+
+            $multiplicadorTalla = 1.0;
+            if ($validated['id_talla']) {
+                $talla = \App\Models\Talla::findOrFail($validated['id_talla']);
+                $multiplicadorTalla = $talla->multiplicador_cantidad;
+            }
+
+            $bomItems = BomEstilo::porEstilo($estiloId)
+                                ->with([
+                                    'material.categoria',
+                                    'material.unidadMedida',
+                                    'proceso'
+                                ])
+                                ->activos()
+                                ->get();
+
+            $reporte = $bomItems->map(function($item) use ($multiplicadorTalla, $validated) {
+                return $item->getResumenReporte($multiplicadorTalla, $validated['id_color']);
+            });
+
+            $estadisticas = BomEstilo::getEstadisticasPorEstilo($estiloId);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'estilo' => $estilo,
+                    'parametros' => $validated,
+                    'multiplicador_talla' => $multiplicadorTalla,
+                    'reporte_items' => $reporte,
+                    'estadisticas' => $estadisticas,
+                    'fecha_generacion' => now()->toISOString()
+                ]
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Estilo no encontrado'
+            ], 404);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al generar reporte de BOM',
                 'error' => $e->getMessage()
             ], 500);
         }

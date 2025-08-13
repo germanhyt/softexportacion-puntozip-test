@@ -19,6 +19,7 @@ class Estilo extends Model
         'año_produccion',
         'costo_objetivo',
         'tiempo_objetivo_min',
+        'tipo_producto',
         'estado'
     ];
 
@@ -33,7 +34,25 @@ class Estilo extends Model
     const UPDATED_AT = 'fecha_actualizacion';
     const CREATED_AT = 'fecha_creacion';
 
-    // Relaciones
+    // Constantes para tipos de producto
+    const TIPO_POLO = 'polo';
+    const TIPO_CAMISA = 'camisa';
+    const TIPO_PANTALON = 'pantalon';
+    const TIPO_VESTIDO = 'vestido';
+    const TIPO_OTRO = 'otro';
+
+    // Constantes para temporadas
+    const TEMPORADAS = ['primavera', 'verano', 'otoño', 'invierno'];
+
+    // Constantes para estados
+    const ESTADO_DESARROLLO = 'desarrollo';
+    const ESTADO_ACTIVO = 'activo';
+    const ESTADO_DESCONTINUADO = 'descontinuado';
+
+    // ============================================================================
+    // RELACIONES
+    // ============================================================================
+
     public function variantes(): HasMany
     {
         return $this->hasMany(VarianteEstilo::class, 'id_estilo');
@@ -55,22 +74,36 @@ class Estilo extends Model
         return $this->hasManyThrough(
             Material::class,
             BomEstilo::class,
-            'id_estilo',
-            'id',
-            'id',
-            'id_material'
+            'id_estilo', // Foreign key en bom_estilos
+            'id',        // Foreign key en materiales
+            'id',        // Local key en estilos
+            'id_material' // Local key en bom_estilos
         );
     }
 
-    // Scopes
+    // Flujo actual (el que está marcado como es_actual = true)
+    public function flujoActual()
+    {
+        return $this->hasOne(FlujoEstilo::class, 'id_estilo')->where('es_actual', true);
+    }
+
+    // ============================================================================
+    // SCOPES
+    // ============================================================================
+
     public function scopeActivos($query)
     {
-        return $query->where('estado', 'activo');
+        return $query->where('estado', self::ESTADO_ACTIVO);
     }
 
     public function scopeEnDesarrollo($query)
     {
-        return $query->where('estado', 'desarrollo');
+        return $query->where('estado', self::ESTADO_DESARROLLO);
+    }
+
+    public function scopeDescontinuados($query)
+    {
+        return $query->where('estado', self::ESTADO_DESCONTINUADO);
     }
 
     public function scopePorTemporada($query, $temporada)
@@ -83,28 +116,105 @@ class Estilo extends Model
         return $query->where('año_produccion', $año);
     }
 
-    // Accessors
-    public function getDiferenciaCostoAttribute()
+    public function scopePorTipo($query, $tipo)
     {
-        if (!$this->costo_objetivo) return null;
-        
-        $costoCalculado = $this->variantes()
-            ->join('calculos_variantes', 'variantes_estilos.id', '=', 'calculos_variantes.id_variante_estilo')
-            ->where('calculos_variantes.es_actual', true)
-            ->avg('calculos_variantes.costo_total');
-            
-        return $costoCalculado ? ($costoCalculado - $this->costo_objetivo) : null;
+        return $query->where('tipo_producto', $tipo);
     }
 
-    public function getDiferenciaTiempoAttribute()
+    public function scopeConVariantes($query)
+    {
+        return $query->whereHas('variantes');
+    }
+
+    public function scopeConFlujos($query)
+    {
+        return $query->whereHas('flujos');
+    }
+
+    // ============================================================================
+    // MÉTODOS AUXILIARES
+    // ============================================================================
+
+    /**
+     * Obtener el costo total calculado del estilo
+     */
+    public function getCostoCalculadoAttribute()
+    {
+        $flujoActual = $this->flujoActual;
+        return $flujoActual ? $flujoActual->costo_total_calculado : 0;
+    }
+
+    /**
+     * Obtener el tiempo total calculado del estilo
+     */
+    public function getTiempoCalculadoAttribute()
+    {
+        $flujoActual = $this->flujoActual;
+        return $flujoActual ? $flujoActual->tiempo_total_calculado : 0;
+    }
+
+    /**
+     * Verificar si el estilo cumple con el objetivo de costo
+     */
+    public function cumpleObjetivoCosto()
+    {
+        if (!$this->costo_objetivo) return null;
+        return $this->costo_calculado <= $this->costo_objetivo;
+    }
+
+    /**
+     * Verificar si el estilo cumple con el objetivo de tiempo
+     */
+    public function cumpleObjetivoTiempo()
     {
         if (!$this->tiempo_objetivo_min) return null;
-        
-        $tiempoCalculado = $this->variantes()
-            ->join('calculos_variantes', 'variantes_estilos.id', '=', 'calculos_variantes.id_variante_estilo')
-            ->where('calculos_variantes.es_actual', true)
-            ->avg('calculos_variantes.tiempo_total_min');
-            
-        return $tiempoCalculado ? ($tiempoCalculado - $this->tiempo_objetivo_min) : null;
+        return $this->tiempo_calculado <= $this->tiempo_objetivo_min;
+    }
+
+    /**
+     * Obtener estadísticas básicas del estilo
+     */
+    public function getEstadisticas()
+    {
+        return [
+            'total_variantes' => $this->variantes()->count(),
+            'variantes_activas' => $this->variantes()->where('estado', 'activo')->count(),
+            'total_flujos' => $this->flujos()->count(),
+            'total_materiales' => $this->bomItems()->count(),
+            'materiales_criticos' => $this->bomItems()->where('es_critico', true)->count(),
+            'costo_materiales' => $this->bomItems()->with('material')->get()->sum(function($item) {
+                return $item->cantidad_base * $item->material->costo_unitario;
+            }),
+            'cumple_costo' => $this->cumpleObjetivoCosto(),
+            'cumple_tiempo' => $this->cumpleObjetivoTiempo()
+        ];
+    }
+
+    /**
+     * Métodos estáticos para obtener opciones
+     */
+    public static function getTiposProducto()
+    {
+        return [
+            self::TIPO_POLO,
+            self::TIPO_CAMISA,
+            self::TIPO_PANTALON,
+            self::TIPO_VESTIDO,
+            self::TIPO_OTRO
+        ];
+    }
+
+    public static function getTemporadas()
+    {
+        return self::TEMPORADAS;
+    }
+
+    public static function getEstados()
+    {
+        return [
+            self::ESTADO_DESARROLLO,
+            self::ESTADO_ACTIVO,
+            self::ESTADO_DESCONTINUADO
+        ];
     }
 }

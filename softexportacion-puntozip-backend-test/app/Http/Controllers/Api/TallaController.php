@@ -3,78 +3,71 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Color;
+use App\Models\Talla;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 
-class ColorController extends Controller
+class TallaController extends Controller
 {
     /**
-     * Listar colores
+     * Listar tallas
      */
     public function index(Request $request): JsonResponse
     {
         try {
-            $query = Color::query();
+            $query = Talla::query();
 
             // Aplicar filtros
-            if ($request->has('estado') && $request->estado !== 'todos') {
-                if ($request->estado === 'activos') {
-                    $query->activos();
+            if ($request->has('estado') && $request->estado !== 'todas') {
+                if ($request->estado === 'activas') {
+                    $query->activas();
                 } else {
-                    $query->inactivos();
+                    $query->inactivas();
                 }
             }
 
-            if ($request->has('buscar') && $request->buscar) {
-                $termino = $request->buscar;
-                $query->where(function($q) use ($termino) {
-                    $q->where('nombre', 'like', '%' . $termino . '%')
-                      ->orWhere('codigo_pantone', 'like', '%' . $termino . '%');
-                });
-            }
+            // Ordenamiento por defecto por orden
+            $query->porOrden();
 
-            // Ordenamiento
-            $query->orderBy('nombre');
-
-            $colores = $query->get();
+            $tallas = $query->get();
 
             return response()->json([
                 'success' => true,
-                'data' => $colores
+                'data' => $tallas
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al obtener los colores',
+                'message' => 'Error al obtener las tallas',
                 'error' => $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Crear nuevo color
+     * Crear nueva talla
      */
     public function store(Request $request): JsonResponse
     {
         try {
             $validated = $request->validate([
-                'nombre' => 'required|string|max:100',
-                'codigo_hex' => 'nullable|string|size:7|regex:/^#[0-9A-Fa-f]{6}$/',
-                'codigo_pantone' => 'nullable|string|max:20',
+                'codigo' => 'required|string|max:10|unique:tallas,codigo',
+                'nombre' => 'required|string|max:50',
+                'multiplicador_cantidad' => 'required|numeric|min:0.1|max:10',
+                'orden' => 'required|integer|min:1',
                 'estado' => 'nullable|in:activo,inactivo'
             ]);
 
             $validated['estado'] = $validated['estado'] ?? 'activo';
 
-            $color = Color::create($validated);
+            $talla = Talla::create($validated);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Color creado exitosamente',
-                'data' => $color
+                'message' => 'Talla creada exitosamente',
+                'data' => $talla
             ], 201);
 
         } catch (ValidationException $e) {
@@ -86,66 +79,67 @@ class ColorController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al crear el color',
+                'message' => 'Error al crear la talla',
                 'error' => $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Mostrar color específico
+     * Mostrar talla específica
      */
     public function show(string $id): JsonResponse
     {
         try {
-            $color = Color::with(['variantes.estilo', 'materiales'])->findOrFail($id);
+            $talla = Talla::with('variantes.estilo')->findOrFail($id);
 
             return response()->json([
                 'success' => true,
-                'data' => $color
+                'data' => $talla
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Color no encontrado'
+                'message' => 'Talla no encontrada'
             ], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al obtener el color',
+                'message' => 'Error al obtener la talla',
                 'error' => $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Actualizar color
+     * Actualizar talla
      */
     public function update(Request $request, string $id): JsonResponse
     {
         try {
-            $color = Color::findOrFail($id);
+            $talla = Talla::findOrFail($id);
 
             $validated = $request->validate([
-                'nombre' => 'sometimes|string|max:100',
-                'codigo_hex' => 'sometimes|nullable|string|size:7|regex:/^#[0-9A-Fa-f]{6}$/',
-                'codigo_pantone' => 'sometimes|nullable|string|max:20',
+                'codigo' => 'sometimes|string|max:10|unique:tallas,codigo,' . $id,
+                'nombre' => 'sometimes|string|max:50',
+                'multiplicador_cantidad' => 'sometimes|numeric|min:0.1|max:10',
+                'orden' => 'sometimes|integer|min:1',
                 'estado' => 'sometimes|in:activo,inactivo'
             ]);
 
-            $color->update($validated);
+            $talla->update($validated);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Color actualizado exitosamente',
-                'data' => $color
+                'message' => 'Talla actualizada exitosamente',
+                'data' => $talla
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Color no encontrado'
+                'message' => 'Talla no encontrada'
             ], 404);
         } catch (ValidationException $e) {
             return response()->json([
@@ -156,44 +150,63 @@ class ColorController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al actualizar el color',
+                'message' => 'Error al actualizar la talla',
                 'error' => $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Eliminar color
+     * Eliminar talla
      */
     public function destroy(string $id): JsonResponse
     {
         try {
-            $color = Color::findOrFail($id);
+            $talla = Talla::findOrFail($id);
 
             // Verificar si tiene variantes asociadas
-            if ($color->variantes()->count() > 0) {
+            if ($talla->variantes()->count() > 0) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No se puede eliminar el color porque tiene variantes asociadas'
+                    'message' => 'No se puede eliminar la talla porque tiene variantes asociadas'
                 ], 400);
             }
 
-            $color->update(['estado' => 'inactivo']);
+            $talla->update(['estado' => 'inactivo']);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Color eliminado exitosamente'
+                'message' => 'Talla eliminada exitosamente'
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Color no encontrado'
+                'message' => 'Talla no encontrada'
             ], 404);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error al eliminar el color',
+                'message' => 'Error al eliminar la talla',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener tallas disponibles para dropdown
+     */
+    public function getTallasDisponibles(): JsonResponse
+    {
+        try {
+            return response()->json([
+                'success' => true,
+                'data' => Talla::getTallasDisponibles()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener tallas disponibles',
                 'error' => $e->getMessage()
             ], 500);
         }
