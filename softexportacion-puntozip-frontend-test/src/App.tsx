@@ -892,6 +892,7 @@ function SistemaTextilApp() {
         </h1>
         <p style={{
           color: '#64748b',
+          fontWeight: '600',
           fontSize: '18px',
           margin: '0'
         }}>
@@ -942,7 +943,7 @@ function SistemaTextilApp() {
                   transition: 'all 0.2s',
                 }}
               >
-                🔀 Flujo Interactivo de Procesos
+                🔀 Flujo de Procesos
               </button>
               <button
                 onClick={() => setActiveView('bom')}
@@ -1030,7 +1031,7 @@ function SistemaTextilApp() {
                   <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#1e293b', margin: 0 }}>
                     {estilo.nombre}
                   </h3>
-                  <span style={{
+                  {/* <span style={{
                     padding: '4px 8px',
                     borderRadius: '9999px',
                     fontSize: '12px',
@@ -1041,21 +1042,21 @@ function SistemaTextilApp() {
                       estilo.estado === 'desarrollo' ? '#1e40af' : '#374151',
                   }}>
                     {estilo.estado}
-                  </span>
+                  </span> */}
                 </div>
 
                 <div style={{ marginBottom: '16px' }}>
                   <p style={{ fontSize: '14px', color: '#64748b', margin: '4px 0' }}>
                     Código: {estilo.codigo}
                   </p>
-                  <p style={{ fontSize: '14px', color: '#64748b', margin: '4px 0' }}>
+                  {/* <p style={{ fontSize: '14px', color: '#64748b', margin: '4px 0' }}>
                     Temporada: {estilo.temporada} {estilo.año_produccion}
-                  </p>
-                  {estilo.costo_objetivo && (
+                  </p> */}
+                  {/* {estilo.costo_objetivo && (
                     <p style={{ fontSize: '14px', color: '#10b981', margin: '4px 0' }}>
                       Costo objetivo: ${estilo.costo_objetivo}
                     </p>
-                  )}
+                  )} */}
                 </div>
 
                 {estilo.descripcion && (
@@ -1506,7 +1507,8 @@ function SistemaTextilApp() {
                         color: '#374151',
                         marginBottom: '8px'
                       }}>
-                        Color (Opcional):
+                        Color:
+                        {/* (Opcional): */}
                       </label>
                       {loadingColores ? (
                         <div style={{ padding: '12px', color: '#64748b' }}>Cargando colores...</div>
@@ -1543,11 +1545,11 @@ function SistemaTextilApp() {
                               <div style={{
                                 width: '16px',
                                 height: '16px',
-                                borderRadius: '50%',
-                                background: color.codigo_hex || '#64748b',
+                                // borderRadius: '50%',
+                                // background: color.codigo_hex || '#64748b',
                                 display: 'inline-block',
-                                marginRight: '8px',
-                                border: '1px solid #d1d5db'
+                                // marginRight: '8px',
+                                // border: '1px solid #d1d5db'
                               }} />
                               {color.nombre}
                             </button>
@@ -1647,7 +1649,7 @@ function SistemaTextilApp() {
 
                     {calcularBOMVarianteMutation.isPending && (
                       <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
-                        <div style={{ fontSize: '48px', marginBottom: '16px' }}>⏳</div>
+                        {/* <div style={{ fontSize: '48px', marginBottom: '16px' }}>⏳</div> */}
                         <div>Calculando BOM para variante...</div>
                       </div>
                     )}
@@ -1814,6 +1816,21 @@ function SistemaTextilApp() {
                               }}>
                                 Total Req.
                               </th>
+
+                              <th style={{
+                                padding: '12px 16px',
+                                textAlign: 'center',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                color: '#374151',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px',
+                                borderBottom: '1px solid #e2e8f0',
+                              }}>
+                                Costo Unitario
+                              </th>
+
+
                               <th style={{
                                 padding: '12px 16px',
                                 textAlign: 'center',
@@ -1826,6 +1843,7 @@ function SistemaTextilApp() {
                               }}>
                                 Costo Total
                               </th>
+
                               <th style={{
                                 padding: '12px 16px',
                                 textAlign: 'center',
@@ -1903,6 +1921,9 @@ function SistemaTextilApp() {
                                     {item.material?.unidad_medida || 'UM'}
                                   </div>
                                 </td>
+                                <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '14px', fontWeight: '700', color: '#059669' }}>
+                                  ${item.costos?.costo_unitario || 0}
+                                </td>
                                 <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: '15px', fontWeight: '700', color: '#059669' }}>
                                   ${typeof item.calculo_produccion?.costo_total_requerido === 'number'
                                     ? item.calculo_produccion.costo_total_requerido.toFixed(4)
@@ -1920,7 +1941,7 @@ function SistemaTextilApp() {
                                 </td>
                                 <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
-                                    {item.bom_item?.es_critico && (
+                                    {/* {item.bom_item?.es_critico && (
                                       <span style={{
                                         display: 'inline-flex',
                                         alignItems: 'center',
@@ -1933,7 +1954,7 @@ function SistemaTextilApp() {
                                       }}>
                                         🔴 Crítico
                                       </span>
-                                    )}
+                                    )} */}
                                     {item.bom_item?.aplica_color && (
                                       <span style={{
                                         display: 'inline-flex',

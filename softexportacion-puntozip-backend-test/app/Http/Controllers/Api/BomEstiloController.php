@@ -18,21 +18,21 @@ class BomEstiloController extends Controller
     {
         try {
             $estilo = Estilo::findOrFail($estiloId);
-            
+
             $bomItems = BomEstilo::porEstilo($estiloId)
-                                ->with([
-                                    'material.categoria',
-                                    'material.unidadMedida',
-                                    'proceso'
-                                ])
-                                ->activos()
-                                ->get();
+                ->with([
+                    'material.categoria',
+                    'material.unidadMedida',
+                    'proceso'
+                ])
+                ->activos()
+                ->get();
 
             // Obtener estadísticas del BOM
             $estadisticas = BomEstilo::getEstadisticasPorEstilo($estiloId);
 
             // Transformar datos para incluir cálculos
-            $bomDetallado = $bomItems->map(function($item) {
+            $bomDetallado = $bomItems->map(function ($item) {
                 return $item->getInfoCompleta();
             });
 
@@ -49,7 +49,6 @@ class BomEstiloController extends Controller
                     ]
                 ]
             ]);
-
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -92,7 +91,7 @@ class BomEstiloController extends Controller
                 $itemData['aplica_talla'] = $itemData['aplica_talla'] ?? true;
                 $itemData['aplica_color'] = $itemData['aplica_color'] ?? false;
                 $itemData['es_critico'] = $itemData['es_critico'] ?? false;
-                
+
                 $bomItem = BomEstilo::create($itemData);
                 $itemsCreados[] = $bomItem->load(['material.categoria', 'material.unidadMedida', 'proceso']);
             }
@@ -109,7 +108,6 @@ class BomEstiloController extends Controller
                     'estadisticas' => $estadisticas
                 ]
             ]);
-
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -145,13 +143,13 @@ class BomEstiloController extends Controller
             ]);
 
             $bomItems = BomEstilo::porEstilo($estiloId)
-                                ->with([
-                                    'material.categoria',
-                                    'material.unidadMedida',
-                                    'proceso'
-                                ])
-                                ->activos()
-                                ->get();
+                ->with([
+                    'material.categoria',
+                    'material.unidadMedida',
+                    'proceso'
+                ])
+                ->activos()
+                ->get();
 
             if ($bomItems->isEmpty()) {
                 return response()->json([
@@ -165,9 +163,9 @@ class BomEstiloController extends Controller
             $multiplicadorTalla = $talla->multiplicador_cantidad;
 
             // Calcular BOM para la variante
-            $bomCalculado = $bomItems->map(function($item) use ($multiplicadorTalla, $validated) {
+            $bomCalculado = $bomItems->map(function ($item) use ($multiplicadorTalla, $validated) {
                 $infoCompleta = $item->getInfoCompleta($multiplicadorTalla, $validated['id_color']);
-                
+
                 // Calcular para la cantidad de piezas solicitada
                 $cantidadTotalRequerida = $infoCompleta['bom_item']['cantidad_final'] * $validated['cantidad_piezas'];
                 $costoTotalRequerido = $infoCompleta['costos']['costo_total'] * $validated['cantidad_piezas'];
@@ -208,7 +206,7 @@ class BomEstiloController extends Controller
                     'items_sin_stock' => $itemsConStockInsuficiente,
                     'total_items' => $bomCalculado->count()
                 ],
-                'alertas' => $bomCalculado->flatMap(function($item) {
+                'alertas' => $bomCalculado->flatMap(function ($item) {
                     return $item['alertas'] ?? [];
                 })->toArray()
             ];
@@ -220,7 +218,6 @@ class BomEstiloController extends Controller
                     'resumen' => $resumen
                 ]
             ]);
-
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -260,8 +257,8 @@ class BomEstiloController extends Controller
 
             // Verificar que no exista ya este material en el BOM
             $existeItem = BomEstilo::where('id_estilo', $estiloId)
-                                  ->where('id_material', $validated['id_material'])
-                                  ->exists();
+                ->where('id_material', $validated['id_material'])
+                ->exists();
 
             if ($existeItem) {
                 return response()->json([
@@ -282,7 +279,6 @@ class BomEstiloController extends Controller
                 'message' => 'Item agregado al BOM exitosamente',
                 'data' => $bomItem->load(['material.categoria', 'material.unidadMedida', 'proceso'])
             ], 201);
-
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -316,7 +312,6 @@ class BomEstiloController extends Controller
                 'success' => true,
                 'message' => 'Item eliminado del BOM exitosamente'
             ]);
-
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -351,15 +346,15 @@ class BomEstiloController extends Controller
             }
 
             $bomItems = BomEstilo::porEstilo($estiloId)
-                                ->with([
-                                    'material.categoria',
-                                    'material.unidadMedida',
-                                    'proceso'
-                                ])
-                                ->activos()
-                                ->get();
+                ->with([
+                    'material.categoria',
+                    'material.unidadMedida',
+                    'proceso'
+                ])
+                ->activos()
+                ->get();
 
-            $reporte = $bomItems->map(function($item) use ($multiplicadorTalla, $validated) {
+            $reporte = $bomItems->map(function ($item) use ($multiplicadorTalla, $validated) {
                 return $item->getResumenReporte($multiplicadorTalla, $validated['id_color']);
             });
 
@@ -376,7 +371,6 @@ class BomEstiloController extends Controller
                     'fecha_generacion' => now()->toISOString()
                 ]
             ]);
-
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,

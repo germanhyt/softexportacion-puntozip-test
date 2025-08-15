@@ -150,8 +150,8 @@ class Material extends Model
     {
         $costoBase = $this->costo_unitario * $cantidad;
         
-        // Si es un material que maneja colores específicos (como tintes)
-        if ($colorId && $this->tipo_material === self::TIPO_TINTE) {
+        // Si hay un color específico, verificar si existe costo adicional para este material-color
+        if ($colorId) {
             $materialColor = $this->colores()->where('id_color', $colorId)->first();
             if ($materialColor && $materialColor->pivot->costo_adicional) {
                 $costoBase += $materialColor->pivot->costo_adicional * $cantidad;

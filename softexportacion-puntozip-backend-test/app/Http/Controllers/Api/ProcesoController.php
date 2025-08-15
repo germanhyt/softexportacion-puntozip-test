@@ -11,6 +11,7 @@ use Illuminate\Validation\ValidationException;
 
 class ProcesoController extends Controller
 {
+    
     /**
      * Listar procesos con filtros y paginación
      */
